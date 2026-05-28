@@ -81,7 +81,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app import app as fastapi_app  # noqa: E402
 from app.db import get_db  # noqa: E402
-from app.db.base import Base  # noqa: E402
+from app.db.base import Base, engine as global_engine  # noqa: E402
+
+# The codebase uses `GetDB()` (the module-level context manager in app.db)
+# directly in many places — jobs, xray bootstrap, app.utils.jwt — not just
+# via `Depends(get_db)`. Those calls hit the global engine, not the per-test
+# engine. Both point at sqlite:///:memory: (set above) but they're separate
+# in-memory DBs unless we materialize the schema on the global engine too.
+Base.metadata.create_all(global_engine)
 
 
 @pytest.fixture(scope="session")
