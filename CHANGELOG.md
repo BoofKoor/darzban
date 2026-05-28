@@ -47,6 +47,17 @@ The v0.9.0 release is a stability-focused refresh. See
   is a v1.0+ goal (`V0.9.0_DECISIONS.md` Q11).
 
 #### Fixed
+- **CI install path on a clean Python 3.12 runner.** APScheduler 3.9.1
+  imports `pkg_resources` at module import time; a clean Python 3.12
+  environment ships pip but no setuptools, so the import fails with
+  `ModuleNotFoundError: No module named 'pkg_resources'`. Pinned
+  `setuptools<81` in `requirements-dev.txt` (setuptools 81 dropped the
+  `pkg_resources` shim) and added an explicit pip/setuptools/wheel
+  bootstrap step to `.github/workflows/ci.yml`. Decision: pin setuptools
+  rather than bump APScheduler to 3.10+, because Task 1 is strictly
+  additive and bumping APScheduler is a behavior surface that belongs in
+  a later release. Removing the setuptools pin will be revisited when
+  APScheduler is upgraded.
 - **`app/jobs/review_users.py:add_notification_reminders`** —
   `now: datetime = datetime.utcnow()` was evaluated once at module import,
   so every later call that omitted `now` saw the frozen import-time

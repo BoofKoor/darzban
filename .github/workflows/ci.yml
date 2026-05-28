@@ -29,10 +29,15 @@ jobs:
             requirements.txt
             requirements-dev.txt
 
+      - name: Bootstrap pip / setuptools / wheel
+        # Clean Python 3.12 runners ship pip but not setuptools, and
+        # APScheduler 3.9.1 imports `pkg_resources` at module import.
+        # `setuptools<81` is also pinned in requirements-dev.txt; this
+        # step makes the bootstrap explicit and order-independent.
+        run: python -m pip install --upgrade pip 'setuptools<81' wheel
+
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          pip install -r requirements.txt -r requirements-dev.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       - name: Ruff lint
         run: ruff check .
