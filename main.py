@@ -2,6 +2,7 @@ import click
 import logging
 import os
 import ssl
+import sys
 
 import uvicorn
 from cryptography import x509
@@ -10,6 +11,50 @@ from cryptography.hazmat.backends import default_backend
 from app import app, logger
 from config import (DEBUG, UVICORN_HOST, UVICORN_PORT, UVICORN_SSL_CERTFILE,
                     UVICORN_SSL_KEYFILE, UVICORN_SSL_CA_TYPE, UVICORN_UDS)
+
+
+def _enforce_single_worker():
+    """Refuse to start under a multi-worker uvicorn configuration.
+
+    APScheduler and the Xray subsystem keep in-process singletons
+    (scheduler instance, XRayCore, XRayAPI, the `nodes` dict). Running
+    multiple worker processes would silently duplicate every scheduled
+    job and split node/user state across workers. See the comment at
+    main.py:48-49 and docs/CODEBASE_MAP.md §6.12.
+
+    Multi-worker support is a v1.0+ goal — see docs/V0.9.0_DECISIONS.md Q11.
+    """
+    env_workers = os.environ.get("UVICORN_WORKERS")
+    cli_workers = None
+    argv = sys.argv[1:]
+    for i, arg in enumerate(argv):
+        if arg == "--workers" and i + 1 < len(argv):
+            cli_workers = argv[i + 1]
+        elif arg.startswith("--workers="):
+            cli_workers = arg.split("=", 1)[1]
+
+    for source, raw in (("UVICORN_WORKERS env", env_workers), ("--workers CLI arg", cli_workers)):
+        if raw is None or raw == "":
+            continue
+        try:
+            n = int(raw)
+        except ValueError:
+            logger.error(
+                f"{source} is not an integer ({raw!r}); refusing to start. "
+                "Marzban only supports workers=1."
+            )
+            sys.exit(1)
+        if n > 1:
+            logger.error(
+                f"Detected {source}={n}. Marzban only supports a single worker: "
+                "APScheduler and the Xray subsystem hold in-process singletons "
+                "(scheduler, XRayCore, XRayAPI, the live `nodes` map). Running "
+                "multiple workers would duplicate scheduled jobs and split Xray "
+                "state across processes. Unset UVICORN_WORKERS / drop --workers, "
+                "or set it to 1. Multi-worker support is on the v1.0+ roadmap "
+                "(see docs/V0.9.0_DECISIONS.md Q11)."
+            )
+            sys.exit(1)
 
 
 def validate_cert_and_key(cert_file_path, key_file_path, ca_type):
@@ -47,6 +92,7 @@ Self-signed CAs are useful in testing or internal use cases, they’re not suita
 if __name__ == "__main__":
     # Do NOT change workers count for now
     # multi-workers support isn't implemented yet for APScheduler and XRay module
+    _enforce_single_worker()
 
     bind_args = {}
     if UVICORN_SSL_CA_TYPE not in ["public", "private"]:
