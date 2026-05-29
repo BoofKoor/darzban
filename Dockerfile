@@ -1,15 +1,22 @@
 ARG PYTHON_VERSION=3.12
+# Keep this default in sync with scripts/install_xray.sh DEFAULT_VERSION.
+ARG XRAY_VERSION=v26.2.6
 
 FROM python:$PYTHON_VERSION-slim AS build
 
 ENV PYTHONUNBUFFERED=1
+ARG XRAY_VERSION
 
 WORKDIR /code
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl unzip gcc python3-dev libpq-dev \
-    && curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Xray at a pinned version (v0.9.0: was previously "latest" via
+# upstream install_latest_xray.sh — see CHANGELOG and CODEBASE_MAP §6).
+COPY scripts/install_xray.sh /tmp/install_xray.sh
+RUN bash /tmp/install_xray.sh --version "$XRAY_VERSION"
 
 COPY ./requirements.txt /code/
 RUN python3 -m pip install --upgrade pip setuptools \
