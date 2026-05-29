@@ -81,14 +81,19 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from app import app as fastapi_app  # noqa: E402
 from app.db import get_db  # noqa: E402
-from app.db.base import Base, engine as global_engine  # noqa: E402
+from app.db.base import Base  # noqa: E402
+from app.utils import jwt as jwt_utils  # noqa: E402
 
-# The codebase uses `GetDB()` (the module-level context manager in app.db)
-# directly in many places — jobs, xray bootstrap, app.utils.jwt — not just
-# via `Depends(get_db)`. Those calls hit the global engine, not the per-test
-# engine. Both point at sqlite:///:memory: (set above) but they're separate
-# in-memory DBs unless we materialize the schema on the global engine too.
-Base.metadata.create_all(global_engine)
+# Override get_secret_key so tests don't need a JWT row in any database.
+# Before Task 3 the module-level GetDB() inside get_secret_key reached
+# `app.db.base.engine` (separate from the per-test engine), forcing
+# conftest to create the schema on that global engine as a workaround.
+# Replacing the function entirely removes that reach and retires the
+# dual-engine workaround. cache_clear() handles any earlier import that
+# may have populated the @lru_cache.
+_TEST_JWT_SECRET = "test-jwt-secret-not-for-production"
+jwt_utils.get_secret_key.cache_clear()
+jwt_utils.get_secret_key = lambda: _TEST_JWT_SECRET  # type: ignore[assignment]
 
 
 @pytest.fixture(scope="session")
