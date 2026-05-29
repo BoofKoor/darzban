@@ -1,3 +1,4 @@
+from functools import wraps
 from threading import Thread
 
 import anyio
@@ -5,6 +6,7 @@ from fastapi import BackgroundTasks
 
 
 def threaded_function(func):
+    @wraps(func)
     def wrapper(*args, **kwargs):
         thread = Thread(target=func, args=args, daemon=True, kwargs=kwargs)
         thread.start()
