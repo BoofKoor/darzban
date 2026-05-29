@@ -12,6 +12,41 @@ The v0.9.0 release is a stability-focused refresh. See
 `docs/V0.9.0_DECISIONS.md` for the full scope and rationale and
 `docs/CODEBASE_MAP.md` for the codebase survey that drove it.
 
+### Task 2 — Decouple `app/db/models` and `app/models/*` from `app/xray`
+
+#### Changed
+- **Refactored `app/db/models.py`, `app/models/user.py`, and
+  `app/models/user_template.py`** to look up inbound metadata through a
+  new `InboundLookup` abstraction in `app/db/lookups.py` instead of
+  importing `app/xray` directly. The default `XrayConfigLookup`
+  proxies to `app.xray.config` with lazy imports inside each method —
+  importing `app.db.lookups` no longer triggers Xray subsystem
+  initialisation. **No production behaviour change.**
+- Enables tests to inject a fake lookup (`set_lookup(...)` /
+  `reset_lookup()`), unblocking isolated unit testing of DB models
+  and Pydantic validators. Tracked under `V0.9.0_DECISIONS.md` Q7 and
+  `CODEBASE_MAP.md` §6.8.
+- Discovery during Task 2 found that `app/models/user_template.py` had
+  the same coupling pattern as `app/db/models.py` and `app/models/user.py`,
+  though it was not enumerated in `CODEBASE_MAP §6.8`. It is included
+  in this refactor so the decoupling is complete.
+
+#### Notes
+- The `tests/conftest.py` dual-engine workaround (creating tables on
+  the global `app.db.base.engine` in addition to the per-test engine)
+  is **retained**. Discovery confirmed it exists for code paths that
+  reach the module-level `GetDB()` context manager — e.g.
+  `app.utils.jwt.get_secret_key()` reading the JWT secret table — and
+  is orthogonal to the model ↔ xray coupling. Removing it cleanly
+  belongs to Task 3 (lifespan migration), which will rework the
+  global-engine pattern as a whole.
+- The conftest import-time stubs for `subprocess.check_output`,
+  `requests.get`, and `socket.socket.connect` are also retained for
+  the same reason: `import app.models.user` still transitively loads
+  `app.xray` (via `app.subscription.share`, which itself imports xray
+  and runs `get_public_ip()` at import). Cutting that chain belongs to
+  Task 3.
+
 ### Task 1 — Foundation
 
 #### Added
