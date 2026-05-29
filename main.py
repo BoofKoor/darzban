@@ -9,7 +9,8 @@ from cryptography import x509
 from cryptography.hazmat.backends import default_backend
 
 from app import app, logger
-from config import (DEBUG, UVICORN_HOST, UVICORN_PORT, UVICORN_SSL_CERTFILE,
+from app.utils.log_setup import configure_logging
+from config import (DEBUG, LOG_FORMAT, UVICORN_HOST, UVICORN_PORT, UVICORN_SSL_CERTFILE,
                     UVICORN_SSL_KEYFILE, UVICORN_SSL_CA_TYPE, UVICORN_UDS)
 
 
@@ -137,6 +138,13 @@ Then, navigate to {click.style(f'http://127.0.0.1:{UVICORN_PORT}', bold=True)} o
     if DEBUG:
         bind_args['uds'] = None
         bind_args['host'] = '0.0.0.0'
+
+    # Optional structured logging (LOG_FORMAT=json). Default `text`
+    # preserves uvicorn's current human-readable output. Applied after
+    # uvicorn would have configured its handlers — done from the
+    # application side as the first request fires; here we apply it
+    # eagerly so even pre-yield startup logs are JSON when requested.
+    configure_logging(LOG_FORMAT)
 
     try:
         uvicorn.run(

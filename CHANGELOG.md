@@ -12,6 +12,91 @@ The v0.9.0 release is a stability-focused refresh. See
 `docs/V0.9.0_DECISIONS.md` for the full scope and rationale and
 `docs/CODEBASE_MAP.md` for the codebase survey that drove it.
 
+### Fixed
+- **Dockerfile build stage `setuptools` pin (`<81`).** Task 1 pinned
+  `setuptools<81` in `requirements-dev.txt` and in the
+  `.github/workflows/ci.yml` lint-and-test bootstrap, but missed the
+  Dockerfile, which still ran `pip install --upgrade pip setuptools`
+  with no upper bound. setuptools 81 removed `pkg_resources`, and
+  APScheduler 3.9.1 imports it at module load — so the production
+  image build broke at the final stage's `marzban-cli completion
+  install` step with `ModuleNotFoundError: No module named
+  'pkg_resources'`. The Dockerfile build stage now matches the CI
+  bootstrap (`pip install --upgrade pip 'setuptools<81' wheel`).
+  Same root cause as the Task 1 CI fix, in a second place that fix
+  missed.
+- **`docker-build` CI job** added to `.github/workflows/ci.yml` so
+  "CI green" actually includes "the image builds". Runs in parallel
+  with lint-and-test so fast feedback is unaffected.
+
+### Task 3 — Reliability infrastructure
+
+#### Changed
+- **Lifespan migration.** Replaced the four `@app.on_event("startup")`
+  and three `@app.on_event("shutdown")` handlers spread across
+  `app/__init__.py`, `app/dashboard/__init__.py`,
+  `app/jobs/0_xray_core.py`, `app/jobs/send_notifications.py`, and
+  `app/telegram/__init__.py` with a single async `lifespan` context
+  manager passed to `FastAPI(lifespan=...)`. The previous
+  registration / reverse-registration order is preserved exactly. The
+  `app/jobs/0_xray_core.py` filename was renamed to
+  `app/jobs/xray_core.py` — the `0_` prefix only existed to force first-
+  position registration of `@app.on_event` handlers; lifespan controls
+  ordering explicitly so the prefix is no longer needed.
+- **`import app` now performs zero subprocess / network / socket I/O.**
+  Three import-time side effects were deferred:
+  - `XRayCore.__init__`'s `xray version` subprocess call → now a
+    `functools.cached_property version` (first read does the
+    subprocess once).
+  - `app/subscription/share.py:27-28` `SERVER_IP = get_public_ip()` /
+    `SERVER_IPV6 = get_public_ipv6()` (up to ~15 s of outbound HTTP at
+    import) → now `lru_cache`'d `get_server_ip()` /
+    `get_server_ipv6()` helpers, called on demand from
+    `setup_format_variables`.
+  - The free-port scan + `XRayConfig` parse in `app/xray/__init__.py`
+    → deferred via a module-level `__getattr__` (PEP 562). `xray.core`,
+    `xray.config`, and `xray.api` are constructed on first attribute
+    access; `init_for_tests(config)` lets test conftests bootstrap
+    without a port scan.
+  - `tests/conftest.py` dropped all three import-time stubs
+    (`subprocess.check_output`, `requests.get`, `socket.socket.connect`)
+    and the dual-engine workaround for the JWT secret. A new
+    `tests/test_import_isolation.py` forks a fresh interpreter with
+    each of those calls blocked and asserts `import app` succeeds —
+    locking the invariant in CI.
+
+#### Changed (behaviour)
+- **Node connect/restart failures now log at ERROR with traceback.**
+  `app/xray/operations.py` previously logged `logger.info("Unable to
+  connect to X node")` with no exception text (the real error only
+  landed in `Node.message`). Both sites are now
+  `logger.error(..., exc_info=True)` so the full traceback is in the
+  log. Other INFO lifecycle logs are unchanged. (`CODEBASE_MAP §6.3`,
+  `V0.9.0_DECISIONS Q8`.)
+
+#### Added
+- **`LOG_FORMAT` env var** (default `text`, opt-in `json`). When set
+  to `json`, the new `app/utils/log_setup.JsonFormatter` emits
+  one-JSON-object-per-line with `ts/level/logger/msg/module/func/line`,
+  any `extra={...}` keys, and an `exc_info` traceback block when
+  present. Stdlib-only — no new dependency. `text` (default) preserves
+  uvicorn's current human-readable format.
+
+#### Deprecated
+- **rpyc node transport.** When a node connects via rpyc
+  (`RPyCXRayNode`), the panel logs a one-shot `DEPRECATED` warning per
+  process. rpyc support stays in v0.9.x; removal is targeted for
+  **v1.0**. See [`docs/migrating-from-rpyc.md`](docs/migrating-from-rpyc.md)
+  for the (node-side, panel-transparent) migration procedure to the
+  REST/uvicorn agent.
+
+#### Notes
+- `tests/conftest.py` dual-engine workaround (creating tables on
+  `app.db.base.engine` in addition to the per-test engine) is now
+  retired. `app.utils.jwt.get_secret_key` is overridden in conftest to
+  return a static test secret, removing the only code path that
+  reached the global engine.
+
 ### Task 2 — Decouple `app/db/models` and `app/models/*` from `app/xray`
 
 #### Changed
