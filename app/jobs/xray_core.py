@@ -4,11 +4,22 @@ import traceback
 from app import logger, scheduler, xray
 from app.db import GetDB, crud
 from app.models.node import NodeStatus
+from app.xray.reconnect import default_clock, get_policy
 from config import JOB_CORE_HEALTH_CHECK_INTERVAL
 from xray_api import exc as xray_exc
 
 
-def core_health_check():
+def core_health_check(clock=default_clock):
+    """The 10 s health-check tick.
+
+    v0.9.0 Task 4: consult the per-node ReconnectPolicy before
+    scheduling a reconnect. A node whose backoff cooldown hasn't
+    elapsed is skipped THIS tick — the policy spaces attempts across
+    ticks instead of hammering every 10 s indefinitely.
+
+    The ``clock`` parameter is injected so tests can pace ticks
+    against a fake clock; production uses ``default_clock`` (monotonic).
+    """
     config = None
 
     # main core
@@ -17,8 +28,19 @@ def core_health_check():
             config = xray.config.include_db_users()
         xray.core.restart(config)
 
+    now = clock()
+
     # nodes' core
     for node_id, node in list(xray.nodes.items()):
+        # Gate every node on its policy. If a previous attempt failed
+        # and the cooldown hasn't elapsed, skip this tick. Operator-
+        # initiated reconnect paths (POST /node/{id}/reconnect, lifespan
+        # boot, node-add, etc.) do NOT pass through this loop and are
+        # not gated — see Task 4 discovery report §5.
+        policy = get_policy(node_id)
+        if not policy.should_attempt(now):
+            continue
+
         if node.connected:
             try:
                 assert node.started
