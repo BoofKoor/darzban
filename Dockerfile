@@ -19,7 +19,14 @@ COPY scripts/install_xray.sh /tmp/install_xray.sh
 RUN bash /tmp/install_xray.sh --version "$XRAY_VERSION"
 
 COPY ./requirements.txt /code/
-RUN python3 -m pip install --upgrade pip setuptools \
+# setuptools<81 pin: setuptools 81 removed pkg_resources, which
+# APScheduler 3.9.1 still imports at module import time. Without this
+# pin, `pip install --upgrade setuptools` here installs 82+ and the
+# final-stage `marzban-cli completion install` fails at import with
+# ModuleNotFoundError: No module named 'pkg_resources'. Same root
+# cause as the Task 1 CI bootstrap pin in .github/workflows/ci.yml —
+# Task 1 missed the Dockerfile; this is the matching fix.
+RUN python3 -m pip install --upgrade pip 'setuptools<81' wheel \
     && pip install --no-cache-dir --upgrade -r /code/requirements.txt
 
 FROM python:$PYTHON_VERSION-slim

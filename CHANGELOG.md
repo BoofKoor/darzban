@@ -12,6 +12,23 @@ The v0.9.0 release is a stability-focused refresh. See
 `docs/V0.9.0_DECISIONS.md` for the full scope and rationale and
 `docs/CODEBASE_MAP.md` for the codebase survey that drove it.
 
+### Fixed
+- **Dockerfile build stage `setuptools` pin (`<81`).** Task 1 pinned
+  `setuptools<81` in `requirements-dev.txt` and in the
+  `.github/workflows/ci.yml` lint-and-test bootstrap, but missed the
+  Dockerfile, which still ran `pip install --upgrade pip setuptools`
+  with no upper bound. setuptools 81 removed `pkg_resources`, and
+  APScheduler 3.9.1 imports it at module load — so the production
+  image build broke at the final stage's `marzban-cli completion
+  install` step with `ModuleNotFoundError: No module named
+  'pkg_resources'`. The Dockerfile build stage now matches the CI
+  bootstrap (`pip install --upgrade pip 'setuptools<81' wheel`).
+  Same root cause as the Task 1 CI fix, in a second place that fix
+  missed.
+- **`docker-build` CI job** added to `.github/workflows/ci.yml` so
+  "CI green" actually includes "the image builds". Runs in parallel
+  with lint-and-test so fast feedback is unaffected.
+
 ### Task 3 — Reliability infrastructure
 
 #### Changed
