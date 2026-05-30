@@ -39,10 +39,20 @@ def _clean_policy_registry():
 @pytest.fixture
 def fake_dbnode():
     """Minimal stand-in for ``app.db.models.Node`` as returned by
-    ``crud.get_node_by_id``. operations.py only reads ``.id``,
-    ``.name``, and ``.status`` on the happy path.
+    ``crud.get_node_by_id``. operations.py reads ``.id``, ``.name``,
+    and ``.status`` on the happy path, plus the connection attributes
+    (``.address``, ``.port``, ``.api_port``, ``.usage_coefficient``)
+    when ``add_node`` runs (the reconnect-recreate path).
     """
-    return SimpleNamespace(id=42, name="fake-node", status=NodeStatus.connecting)
+    return SimpleNamespace(
+        id=42,
+        name="fake-node",
+        status=NodeStatus.connecting,
+        address="127.0.0.1",
+        port=62050,
+        api_port=62051,
+        usage_coefficient=1.0,
+    )
 
 
 @pytest.fixture
@@ -293,3 +303,130 @@ def test_remove_node_evicts_policy(fake_dbnode):
     policy_after = reconnect.get_policy(fake_dbnode.id)
     assert policy_after is not policy_before
     assert policy_after.consecutive_failures == 0
+
+
+def test_remove_node_with_discard_policy_state_false_preserves_policy(fake_dbnode):
+    """The reconnect path (add_node) must NOT wipe the policy."""
+    fake = _FakeNode(starts_connected=True)
+    _inject_fake_node(fake_dbnode.id, fake)
+
+    policy_before = reconnect.get_policy(fake_dbnode.id)
+    policy_before.on_failure(now=0.0)
+    policy_before.on_failure(now=0.0)
+    assert policy_before.consecutive_failures == 2
+
+    xray.operations.remove_node(fake_dbnode.id, discard_policy_state=False)
+
+    policy_after = reconnect.get_policy(fake_dbnode.id)
+    assert policy_after is policy_before          # same object, preserved
+    assert policy_after.consecutive_failures == 2
+
+
+# ---- REGRESSION: backoff accumulates across REAL successive connect_node ----
+#
+# This reproduces the real-server flow that the original Task 4 tests
+# missed: connect_node recreates the XRayNode via add_node on each retry
+# of a still-disconnected node (`assert node.connected` fails ->
+# add_node -> remove_node). The bug was that remove_node discarded the
+# ReconnectPolicy on that internal recreate, resetting
+# consecutive_failures to 1 on every attempt ("always retry in 1s").
+#
+# Unlike the other tests in this file, this one does NOT bypass
+# add_node — it lets add_node run its real body (stubbing only the
+# leaf I/O: get_tls and the XRayNode constructor) so the
+# recreate-during-reconnect path is genuinely exercised.
+
+class _AlwaysFailingNode:
+    """XRayNode stand-in whose start() always raises and which never
+    reports connected — exactly a connection-refused node.
+    """
+    def __init__(self, *args, **kwargs):
+        self.connected = False
+        self.started = False
+        self.api = None
+
+    def start(self, config):
+        raise ConnectionError("[Errno 111] Connection refused")
+
+    def disconnect(self):
+        self.connected = False
+
+    def get_version(self):
+        return "unreachable"
+
+
+def test_backoff_accumulates_across_successive_connect_node_failures(
+        fake_dbnode, get_node_by_id_returns, recorded_status_calls):
+    # Let add_node run for real; only stub its leaf I/O.
+    with patch.object(xray.operations, "get_tls",
+                      return_value={"key": "k", "certificate": "c"}), \
+         patch.object(xray.operations, "XRayNode", _AlwaysFailingNode), \
+         patch.object(xray.config, "include_db_users", return_value={}):
+
+        node_id = fake_dbnode.id
+        # Drive 6 real failed attempts. Expected progression with
+        # BASE=1, CAP=300, THRESHOLD=5:
+        #   attempt: 1   2   3   4   5(circuit opens)  6
+        #   failures:1   2   3   4   5                 6
+        #   backoff: 1   2   4   8   16                32
+        expected = [
+            (1, 1.0, False),
+            (2, 2.0, False),
+            (3, 4.0, False),
+            (4, 8.0, False),
+            (5, 16.0, True),    # circuit opens at threshold (5)
+            (6, 32.0, True),
+        ]
+        for i, (want_failures, want_backoff, want_circuit) in enumerate(expected, start=1):
+            xray.operations.connect_node.__wrapped__(node_id)
+
+            policy = reconnect.get_policy(node_id)
+            assert policy.consecutive_failures == want_failures, (
+                f"after attempt #{i}: expected {want_failures} failures, "
+                f"got {policy.consecutive_failures}"
+            )
+            assert policy.current_backoff == want_backoff, (
+                f"after attempt #{i}: expected backoff {want_backoff}, "
+                f"got {policy.current_backoff}"
+            )
+            assert policy.is_circuit_open() is want_circuit, (
+                f"after attempt #{i}: expected circuit_open={want_circuit}"
+            )
+
+    # And the Node.message persisted on the LAST attempt reflects the
+    # accumulated state — not a stuck "retry in 1s (1 consecutive failure)".
+    last_error_msg = [c[2] for c in recorded_status_calls
+                      if c[1] == NodeStatus.error][-1]
+    assert "Connection refused" in last_error_msg
+    assert "Retry in 32s" in last_error_msg
+    assert "6 consecutive failures" in last_error_msg
+    assert "circuit open" in last_error_msg
+
+
+def test_successive_failures_then_success_resets_real_flow(
+        fake_dbnode, get_node_by_id_returns, recorded_status_calls):
+    """After accumulating failures via the real add_node path, a
+    successful connect must reset the policy to base.
+    """
+    # Phase 1: fail 3 times (real add_node recreate each time).
+    with patch.object(xray.operations, "get_tls",
+                      return_value={"key": "k", "certificate": "c"}), \
+         patch.object(xray.operations, "XRayNode", _AlwaysFailingNode), \
+         patch.object(xray.config, "include_db_users", return_value={}):
+        for _ in range(3):
+            xray.operations.connect_node.__wrapped__(fake_dbnode.id)
+
+    policy = reconnect.get_policy(fake_dbnode.id)
+    assert policy.consecutive_failures == 3
+    assert policy.current_backoff == 4.0
+
+    # Phase 2: a healthy node connects. Inject a connected fake directly
+    # so the `assert node.connected` short-circuits add_node.
+    _inject_fake_node(fake_dbnode.id, _FakeNode(starts_connected=True))
+    with patch.object(xray.config, "include_db_users", return_value={}):
+        xray.operations.connect_node.__wrapped__(fake_dbnode.id)
+
+    policy = reconnect.get_policy(fake_dbnode.id)
+    assert policy.consecutive_failures == 0
+    assert policy.current_backoff == policy.base
+    assert policy.next_retry_at is None

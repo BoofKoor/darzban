@@ -146,7 +146,21 @@ def update_user(dbuser: "DBUser"):
                 _remove_user_from_inbound(node.api, inbound_tag, email)
 
 
-def remove_node(node_id: int):
+def remove_node(node_id: int, discard_policy_state: bool = True):
+    """Tear down the in-memory XRayNode for ``node_id``.
+
+    ``discard_policy_state`` controls whether the per-node
+    ReconnectPolicy registry entry is evicted too. It defaults to True
+    for genuine removals (operator delete, node disabled). It MUST be
+    False when called from ``add_node`` during the reconnect path:
+    ``connect_node`` recreates the XRayNode object on every retry of a
+    still-disconnected node (assert node.connected fails -> add_node),
+    and discarding the policy there would reset consecutive_failures to
+    0 between every attempt — defeating the exponential backoff and
+    circuit breaker entirely (the policy must accumulate ACROSS
+    attempts; that is precisely why it lives in the module registry and
+    not on the XRayNode instance).
+    """
     if node_id in xray.nodes:
         try:
             xray.nodes[node_id].disconnect()
@@ -157,13 +171,17 @@ def remove_node(node_id: int):
                 del xray.nodes[node_id]
             except KeyError:
                 pass
-            # Evict per-node reconnect state too (v0.9.0 Task 4). A
-            # re-added node will get a fresh policy on next get_policy.
-            discard_policy(node_id)
+            # Evict per-node reconnect state only on genuine removal.
+            # See the docstring above for why add_node must NOT discard.
+            if discard_policy_state:
+                discard_policy(node_id)
 
 
 def add_node(dbnode: "DBNode"):
-    remove_node(dbnode.id)
+    # Recreate the in-memory connection object but PRESERVE the
+    # ReconnectPolicy — this is the reconnect path, and backoff must
+    # accumulate across attempts.
+    remove_node(dbnode.id, discard_policy_state=False)
 
     tls = get_tls()
     xray.nodes[dbnode.id] = XRayNode(address=dbnode.address,
