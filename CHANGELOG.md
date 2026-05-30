@@ -12,6 +12,97 @@ The v0.9.0 release is a stability-focused refresh. See
 `docs/V0.9.0_DECISIONS.md` for the full scope and rationale and
 `docs/CODEBASE_MAP.md` for the codebase survey that drove it.
 
+### Task 4 — Node reliability: reconnect backoff + circuit breaker
+
+The biggest behaviour change in v0.9.0. Directly targets the
+100%-CPU reconnect loops and infinite-restart issue called out in
+`docs/CODEBASE_MAP.md §6.4`.
+
+#### Changed (behaviour)
+- **`core_health_check` is now gated by a per-node
+  `ReconnectPolicy`.** Before: every 10 s tick called
+  `restart_node` / `connect_node` for every down node, forever — a
+  flapping or unreachable node was hammered indefinitely at fixed
+  cadence. After: each node carries its own exponential backoff
+  state (`1s → 2s → 4s → ... → 300s` cap) and a circuit breaker
+  (default 5 consecutive failures). When the cooldown hasn't
+  elapsed, the tick **skips** the node entirely — no `connect_node`
+  call, no DB write, no log spam. See `app/xray/reconnect.py` and
+  `app/jobs/xray_core.py:11-58`.
+- **`Node.message` on failure now includes structured retry info.**
+  Format: `"<exception text>. Retry in Ns (M consecutive failures[;
+  circuit open])."` — the exception text remains the prefix so
+  existing readers (admin UI, telegram bot, `NodeResponse`
+  passthrough) keep working unchanged.
+- **rpyc connect no-sleep retry loop removed**
+  (`app/xray/node.py:351-373`). Used to spin up to four immediate
+  TLS handshakes on EOFError; now a single attempt, with the
+  `ReconnectPolicy` at the health-check layer as the **single
+  source of retry timing**.
+- **Symmetric `_restarting_nodes` guard** added (mirror of the
+  existing `_connecting_nodes`) in `app/xray/operations.py`. Prevents
+  stacked restart attempts when a slow restart is still in flight as
+  the next health-check tick fires — without this, a slow restart
+  could double-count failures in the policy.
+
+#### Bypass semantics (intentional)
+Operator-initiated reconnect paths NEVER pass through the
+health-check policy gate — they execute immediately:
+
+- `POST /api/node/{id}/reconnect` (operator force)
+- `POST /api/node` (newly created node, first connect)
+- `PUT /api/node/{id}` (modified node)
+- `POST /api/core/restart` and admin/user mutations that fan-out a
+  per-node restart
+- telegram-initiated restart
+- lifespan `start_core` boot (each enabled node, one-shot)
+
+These paths still **update** the policy on outcome:
+`on_success()` on a successful manual attempt resets the cooldown;
+`on_failure()` on a failed manual attempt does **not** reset (this
+is deliberate — resetting on a known-failing node would re-introduce
+the hammering we're removing).
+
+#### Added
+- New module `app/xray/reconnect.py` — `ReconnectPolicy` (backoff +
+  circuit breaker, injected clock, full RMW under per-policy
+  threading lock) and a module-level `Dict[int, ReconnectPolicy]`
+  registry keyed by `node_id`. Policy state lives in this registry,
+  NOT on the `XRayNode` instance — `XRayNode` objects are replaced
+  by `operations.add_node` during the reconnect path; pinning state
+  to the object would lose the failure counter exactly when we need
+  it.
+- `app/xray/operations.remove_node` evicts the registry entry so a
+  re-added node gets a fresh policy.
+- Config knobs (`config.py`, decouple-based, with safe defaults):
+  - `NODE_RECONNECT_BACKOFF_BASE` (float, **1.0**)
+  - `NODE_RECONNECT_BACKOFF_CAP` (float, **300.0**)
+  - `NODE_RECONNECT_CIRCUIT_THRESHOLD` (int, **5**)
+
+#### Internal
+- `app/utils/concurrency.threaded_function` now uses
+  `functools.wraps`. Side effect: `__wrapped__` is set so tests can
+  invoke the synchronous inner deterministically (no thread races in
+  assertions).
+
+#### Tests
+- `tests/test_reconnect_policy.py` (18 tests) — backoff progression,
+  cooldown gating, reset-on-success, circuit open/close, snapshot
+  immutability, registry isolation, two concurrency regression tests
+  (lost-update detection across 32×50 threads; mixed
+  success/failure across 20 threads).
+- `tests/test_reconnect_integration.py` (9 tests) — `connect_node` /
+  `restart_node` policy hooks fire correctly, `Node.message`
+  formatting (including pluralization and circuit-open suffix),
+  in-flight guards prevent double policy updates, `remove_node`
+  evicts the registry.
+- `tests/test_health_check_gate.py` (6 tests) — not-due node fully
+  skipped (`assert_not_called` on both `connect_node` /
+  `restart_node`), due node is attempted, fresh node attempted
+  immediately, per-node gating independence.
+
+All tests use an **injected clock** — zero real `time.sleep`.
+
 ### Fixed
 - **Dockerfile build stage `setuptools` pin (`<81`).** Task 1 pinned
   `setuptools<81` in `requirements-dev.txt` and in the

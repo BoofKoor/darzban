@@ -150,3 +150,12 @@ JOB_RECORD_NODE_USAGES_INTERVAL = config("JOB_RECORD_NODE_USAGES_INTERVAL", cast
 JOB_RECORD_USER_USAGES_INTERVAL = config("JOB_RECORD_USER_USAGES_INTERVAL", cast=int, default=10)
 JOB_REVIEW_USERS_INTERVAL = config("JOB_REVIEW_USERS_INTERVAL", cast=int, default=10)
 JOB_SEND_NOTIFICATIONS_INTERVAL = config("JOB_SEND_NOTIFICATIONS_INTERVAL", cast=int, default=30)
+
+# v0.9.0 Task 4 — per-node reconnect policy. The health-check loop
+# consults `ReconnectPolicy.should_attempt(now)` before retrying a
+# down node. Failed attempts double the backoff (BASE * 2^(n-1)),
+# capped at CAP. Once consecutive_failures reaches CIRCUIT_THRESHOLD
+# the policy is "circuit open"; retries continue but spaced at CAP.
+NODE_RECONNECT_BACKOFF_BASE = config("NODE_RECONNECT_BACKOFF_BASE", cast=float, default=1.0)
+NODE_RECONNECT_BACKOFF_CAP = config("NODE_RECONNECT_BACKOFF_CAP", cast=float, default=300.0)
+NODE_RECONNECT_CIRCUIT_THRESHOLD = config("NODE_RECONNECT_CIRCUIT_THRESHOLD", cast=int, default=5)

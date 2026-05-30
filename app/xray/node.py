@@ -351,26 +351,27 @@ class RPyCXRayNode:
     def connect(self):
         self.disconnect()
 
-        tries = 0
-        while True:
-            tries += 1
-            self._node_cert = ssl.get_server_certificate((self.address, self.port))
-            self._node_certfile = string_to_temp_file(self._node_cert)
-            conn = rpyc.ssl_connect(self.address,
-                                    self.port,
-                                    service=self._service,
-                                    keyfile=self._keyfile.name,
-                                    certfile=self._certfile.name,
-                                    ca_certs=self._node_certfile.name,
-                                    keepalive=True)
-            try:
-                conn.ping()
-                self.connection = conn
-                break
-            except EOFError as exc:
-                if tries <= 3:
-                    continue
-                raise exc
+        # Single connection attempt — no inner retry loop. The previous
+        # `while True: ... if tries <= 3: continue` (v0.8.x) spun up to
+        # four immediate TLS handshakes on EOFError with zero sleep,
+        # burning CPU/IO on a flapping node. As of v0.9.0 Task 4, the
+        # health-check ReconnectPolicy is the single source of retry
+        # timing: an EOFError raises here, connect_node's except
+        # branch records it via on_failure, and the next attempt is
+        # scheduled by should_attempt(now) on a future health-check
+        # tick — paced by the exponential backoff. See
+        # app/xray/reconnect.py and docs/CODEBASE_MAP.md §6.4.
+        self._node_cert = ssl.get_server_certificate((self.address, self.port))
+        self._node_certfile = string_to_temp_file(self._node_cert)
+        conn = rpyc.ssl_connect(self.address,
+                                self.port,
+                                service=self._service,
+                                keyfile=self._keyfile.name,
+                                certfile=self._certfile.name,
+                                ca_certs=self._node_certfile.name,
+                                keepalive=True)
+        conn.ping()
+        self.connection = conn
 
     @property
     def connected(self):
