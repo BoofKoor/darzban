@@ -11,7 +11,7 @@ from fastapi.routing import APIRoute
 
 from config import ALLOWED_ORIGINS, DOCS, WEBHOOK_ADDRESS, XRAY_SUBSCRIPTION_PATH
 
-__version__ = "0.8.4"
+__version__ = "0.9.0"
 
 scheduler = BackgroundScheduler(
     {"apscheduler.job_defaults.max_instances": 20}, timezone="UTC"
