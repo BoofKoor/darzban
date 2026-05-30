@@ -1,8 +1,10 @@
 # Marzban Fork — Codebase Map
 
-> Foundation document for the **v0.9.0 stability release**.
-> Current version: **0.8.4** (`app/__init__.py:13`).
-> Status: READ-ONLY survey. No code was modified to produce this.
+> Foundation document for the **v0.9.0 stability release** (now shipped).
+> Current version: **0.9.0** (`app/__init__.py:14`).
+> Status: survey snapshot taken at the 0.8.4 baseline. Pointers to
+> changed sites have been kept current; see `CHANGELOG.md` for the
+> v0.9.0 deltas.
 
 ---
 
