@@ -6,65 +6,95 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 this project does not strictly follow SemVer because compatibility with the
 upstream Marzban API surface takes precedence.
 
-## [Unreleased]
+## [0.10.0] - 2026-06-02
 
-### Subscription field fidelity (v0.10 Task 1, PR 1 — Track A)
+A focused subscription-fidelity release. Track A of the v0.10 task
+plan: every Xray v26.2.6 `streamSettings` field operators set in their
+inbounds — and that previous Marzban/Darzban versions silently dropped
+at the inbound resolver — now reaches the client subscription link.
+Plus a CI plumbing fix that unblocks the release workflow under this
+fork's namespace.
 
-Pinned Xray core (`v26.2.6`) added `pinnedPeerCertSha256` /
-`verifyPeerCertByName` as the operator-defined replacement for the now-
-deprecating `allowInsecure`, and reworked xhttp/splithttp transports
-with operator-supplied `extra` + `downloadSettings` objects. Until now,
-**none of these reached the subscription link**: the inbound resolver
-flattened `streamSettings` into a fixed allow-list and the v2ray/v2ray-
-json emitters synthesized their own `extra` dict rather than passing
-the operator's through.
+**Compatibility:** **no DB migrations** — Alembic head is unchanged
+(`2b231de97dc3`); a v0.9.0 (or v0.8.4) SQLite/PostgreSQL/MySQL
+database boots cleanly under v0.10.0 with zero manual steps. No
+forced subscription URL changes — every change is additive and
+byte-identical for hosts that don't set the new fields. Verified
+drop-in upgrade. The follow-up `hosts.config_passthrough` raw-config
+escape hatch (Track B) is **not** part of v0.10.0 and will ship as a
+separate version when ready.
 
-This change wires four fields end-to-end for the v2ray base64 and
-v2ray-json formats:
+### Highlights
 
-- **`pcs` / `vcn`** (URL params, lowercase) and the matching
-  `pinnedPeerCertSha256` / `verifyPeerCertByName` keys in v2ray-json
-  `tlsSettings`. Comma-joined for the URL when the core config supplies
-  a list; emitted only when set; emitted only on `tls` security (not
-  `reality`). v26.2.6 spelling confirmed against the upstream release
-  notes.
-- **xhttp `extra` (operator envelope object)** merged into the
-  synthesized defaults — operator-provided keys win key-by-key, the
-  synthesized scMax* / xPaddingBytes / noGRPCHeader / xmux /
-  keepAlivePeriod defaults remain for anything the operator didn't
-  override. Same path in v2ray-json's `splithttpSettings.extra`.
-- **`downloadSettings`** nested inside the URL-link `extra` JSON
-  (per XTLS share-link convention) and emitted as a top-level
-  `splithttpSettings.downloadSettings` key in v2ray-json.
+- **TLS cert pinning — `pcs` / `vcn`.** Operator-defined
+  `pinnedPeerCertSha256` and `verifyPeerCertByName` on a TLS inbound
+  (the v26.2.6 replacements for `allowInsecure`) now propagate
+  end-to-end. The v2ray base64 share link emits them as `pcs` / `vcn`
+  URL query params (comma-joined when the core config supplies a list);
+  v2ray-json emits them as the matching `pinnedPeerCertSha256` /
+  `verifyPeerCertByName` keys under `tlsSettings`. Emitted only when
+  set; emitted only on `tls` security, not REALITY. Spelling confirmed
+  against the upstream v26.2.6 release notes.
+- **Full xhttpSettings passthrough.** The two complementary Xray
+  xhttp configuration forms — the `extra` envelope object and the
+  equivalent top-level keys directly under `xhttpSettings` — are now
+  both honoured. The inbound resolver stores the entire
+  `xhttpSettings` object verbatim instead of allow-listing a fixed
+  10-scalar subset; the emitters merge it (minus `host`/`path`/`mode`
+  carried separately, and minus the `extra`/`downloadSettings`
+  envelope keys handled below) over the synthesized defaults —
+  operator values win key-by-key, defaults fill anything the operator
+  didn't set. This means every operator-set xhttp field —
+  `xPaddingObfsMode/Key/Header/Placement/Method`,
+  `sessionPlacement/Key`, `seqPlacement/Key`, `scMaxBufferedPosts`,
+  `scStreamUpServerSecs`, `noSSEHeader`, custom `headers`,
+  `enableXmux`, plus anything Xray v26.3+ adds — flows through with
+  zero further code changes. Verified on a live v26.2.6 box against a
+  rich xhttp inbound: every field surfaces in `/sub/{token}/v2ray`
+  (inside the URL `extra=` JSON) and `/sub/{token}/v2ray-json`
+  (top-level under `streamSettings.xhttpSettings`). A bare-xhttp
+  inbound from the same box diffs byte-for-byte empty vs. v0.9.0
+  output, confirming the compat path.
+- **`downloadSettings` for xhttp split download/upload.** The
+  operator's `xhttpSettings.downloadSettings` object is nested inside
+  the URL-link `extra=` JSON (per XTLS share-link convention) and
+  emitted as a top-level `splithttpSettings.downloadSettings` key in
+  v2ray-json.
+- **CI: GHCR-only release publish under `boofkoor/darzban`.** The
+  tag-triggered release workflow (`.github/workflows/build.yml`)
+  inherited a Docker Hub login step that referenced
+  `secrets.DOCKERHUB_USERNAME` / `_TOKEN` — secrets this fork doesn't
+  have, so every tag push was failing at that step and the image
+  never reached either registry. The Docker Hub publish path is now
+  removed; tagged releases publish to `ghcr.io/boofkoor/darzban`
+  (`:latest` + `:vX.Y.Z`) using the auto-issued `GITHUB_TOKEN` with
+  explicit job-level `packages: write` / `contents: read`
+  permissions.
 
-**Full xhttpSettings passthrough (real-server follow-up).** Testing a
-rich xhttp inbound on a live v26.2.6 core showed operators write most
-xhttp params **directly at the top level of `xhttpSettings`** (not
-wrapped in the `extra` envelope). The resolver's fixed allow-list
-dropped every one of them — `xPaddingObfsMode/Key/Header/Placement/
-Method`, `sessionPlacement/Key`, `seqPlacement/Key`,
-`scMaxBufferedPosts`, `scStreamUpServerSecs`, `noSSEHeader`, custom
-`headers`, `enableXmux`, and any future field. The resolver now stores
-the **entire `xhttpSettings` object** verbatim and the emitters merge
-it (minus the `host`/`path`/`mode` params carried separately, and minus
-the `extra`/`downloadSettings` envelope keys handled above) over the
-synthesized defaults — operator values win, defaults fill the rest.
-This is forward-compatible with v26.3+ xhttp fields with zero code
-change. Both the top-level form and the `extra` envelope form are
-supported; they do not double-handle each other.
+### Out of scope for v0.10.0
 
-**Compatibility — no schema change in this PR.** Every field is
-optional; absent → key omitted → byte-for-byte identical output to
-v0.9.0 for every existing host. Locked by regression tests that call
-each emitter with the new kwargs at their defaults / `None` / `{}` /
-the bare `{path,host,mode}` dict and assert equality. PR 2 (Track B)
-follows separately with the `hosts.config_passthrough` column +
-migration for the full raw-config escape hatch.
+- REALITY post-quantum `mldsa65` and VLESS post-quantum `encryption`
+  — neither field is documented for v26.2.6; gated on the next Xray
+  core bump. The resolver already preserves the rest of the relevant
+  blocks so these will light up automatically when the schema lands.
+- clash / clash-meta / sing-box / outline structured emission — those
+  format generators still drop the entire xhttp transport today; a
+  separate track when the demand surfaces.
+- `hosts.config_passthrough` raw-config escape hatch (Track B,
+  v0.10 Task 1's second PR). Carries a schema migration and lands in a
+  later release.
 
-Out of scope this PR: REALITY `mldsa65` and VLESS post-quantum
-`encryption` (their schemas aren't documented for v26.2.6 — flagged for
-the next Xray bump); clash / clash-meta / sing-box / outline structured
-emission (separate track).
+### Verification
+
+- `ruff check .` clean.
+- `pytest -v` — **87 passed** (60 v0.9.0 baseline + 27 new
+  subscription-fidelity goldens and regression tests covering
+  byte-identity, pcs/vcn emission, top-level + envelope xhttp
+  passthrough, and operator-override precedence).
+- Real-server smoke on a v26.2.6 box: rich xhttp inbound →
+  every operator-set field propagates to both formats; bare-xhttp
+  inbound → byte-identical to v0.9.0 output.
+- v2ray-base64 link parses cleanly in v2rayN.
 
 ## [0.9.0] - 2026-05-30
 
