@@ -8,6 +8,31 @@ upstream Marzban API surface takes precedence.
 
 ## [Unreleased]
 
+### Changed
+
+- **Xray-core bump: v26.2.6 → v26.5.9.** Picks up upstream maintenance
+  releases since v26.2.6. Drop-in for this fork: every subscription
+  byte is produced by version-independent pure-Python generators in
+  `app/subscription/` and `app/xray/config.py`, so `/sub/{token}/v2ray`
+  and `/v2ray-json` for existing TLS/pcs/vcn + xhttp inbounds are
+  byte-identical pre- and post-bump. The pin lives in two files only:
+  `Dockerfile` (`ARG XRAY_VERSION`) and `scripts/install_xray.sh`
+  (`DEFAULT_VERSION`) — kept in sync by comment. REALITY `mldsa65` and
+  VLESS post-quantum `encryption` emission remain out of scope (Track
+  B); they will land in a separate change once the v26.5.9 JSON-key
+  and share-link param spellings are confirmed against the binary.
+
+### Fixed
+
+- **`XRayCore.get_x25519` parser hardened for the v25.3.6+ output
+  format.** Upstream renamed the `xray x25519` labels at v25.3.6:
+  the old `Private key: …\nPublic key: …` pair became
+  `PrivateKey: …\nPassword: …\nHash32: …`, where `Password` IS the
+  public key. The previous regex (pinned to the old labels) silently
+  returned `None`, breaking the reality `privateKey`→`publicKey`
+  derivation path used by inbounds that omit `publicKey`. The parser
+  now accepts both label forms; `Hash32` is read and ignored.
+
 ### Subscription field fidelity (v0.10 Task 1, PR 1 — Track A)
 
 Pinned Xray core (`v26.2.6`) added `pinnedPeerCertSha256` /
