@@ -1,6 +1,6 @@
 ARG PYTHON_VERSION=3.12
 # Keep this default in sync with scripts/install_xray.sh DEFAULT_VERSION.
-ARG XRAY_VERSION=v26.2.6
+ARG XRAY_VERSION=v26.5.9
 
 FROM python:$PYTHON_VERSION-slim AS build
 

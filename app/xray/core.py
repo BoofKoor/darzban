@@ -51,12 +51,20 @@ class XRayCore:
         if private_key:
             cmd.extend(['-i', private_key])
         output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
-        m = re.match(r'Private key: (.+)\nPublic key: (.+)', output)
-        if m:
-            private, public = m.groups()
+        # Upstream renamed the labels at v25.3.6. Confirmed against the
+        # v26.5.9 binary (`xray x25519`):
+        #   pre-25.3.6: "Private key: …\nPublic key: …"
+        #   v26.5.9   : "PrivateKey: …\nPassword (PublicKey): …\nHash32: …"
+        # The public key is the "Password" line (label literally reads
+        # "Password (PublicKey)"); "Hash32" is unrelated and ignored.
+        # `[^:]*` swallows any "(PublicKey)"-style parenthetical between
+        # the keyword and the colon so both label spellings parse.
+        priv = re.search(r'^Private\s?[Kk]ey[^:]*:\s*(\S+)', output, re.MULTILINE)
+        pub = re.search(r'^(?:Password|Public\s?[Kk]ey)[^:]*:\s*(\S+)', output, re.MULTILINE)
+        if priv and pub:
             return {
-                "private_key": private,
-                "public_key": public
+                "private_key": priv.group(1),
+                "public_key": pub.group(1),
             }
 
     def __capture_process_logs(self):
