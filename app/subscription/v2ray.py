@@ -22,6 +22,41 @@ from config import (
 )
 
 
+def _csv(value) -> str:
+    # pcs/vcn arrive from Xray config as either a string or a list (Xray
+    # splits comma-separated values core-side). Normalize to the URL-scheme
+    # comma form. Empty/None → "" so callers can `if csv(...)` test.
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value if v)
+    return str(value)
+
+
+# xhttp keys handled OUTSIDE the operator-passthrough merge:
+#   - host/path/mode are carried as their own URL params (and as
+#     top-level splithttpSettings keys in v2ray-json), so they must not
+#     be duplicated inside the merged `extra` object. Per the Xray xhttp
+#     schema, when `extra` exists only host/path/mode/extra take effect.
+#   - `extra` (envelope sub-object) and `downloadSettings` are emitted by
+#     the dedicated xhttp_extra / downloadSettings paths (PR 1); excluding
+#     them here keeps the two code paths from double-handling the same key.
+_XHTTP_PASSTHROUGH_EXCLUDE = ("host", "path", "mode", "extra", "downloadSettings")
+
+
+def _operator_xhttp_extra(xhttp_settings) -> dict:
+    """Operator's full xhttpSettings minus the keys emitted elsewhere
+    (host/path/mode params + extra/downloadSettings dedicated paths).
+    Returns {} when nothing was provided so the synthesized defaults
+    stand unchanged (bare-config byte-identity)."""
+    if not isinstance(xhttp_settings, dict):
+        return {}
+    return {
+        k: v for k, v in xhttp_settings.items()
+        if k not in _XHTTP_PASSTHROUGH_EXCLUDE
+    }
+
+
 class V2rayShareLink(str):
     def __init__(self):
         self.links = []
@@ -81,6 +116,11 @@ class V2rayShareLink(str):
                 heartbeatPeriod=inbound.get("heartbeatPeriod", 0),
                 keepAlivePeriod=inbound.get("keepAlivePeriod", 0),
                 xmux=inbound.get("xmux", {}),
+                pcs=inbound.get("pcs"),
+                vcn=inbound.get("vcn"),
+                xhttp_extra=inbound.get("xhttp_extra"),
+                downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "vless":
@@ -113,6 +153,11 @@ class V2rayShareLink(str):
                 heartbeatPeriod=inbound.get("heartbeatPeriod", 0),
                 keepAlivePeriod=inbound.get("keepAlivePeriod", 0),
                 xmux=inbound.get("xmux", {}),
+                pcs=inbound.get("pcs"),
+                vcn=inbound.get("vcn"),
+                xhttp_extra=inbound.get("xhttp_extra"),
+                downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "trojan":
@@ -145,6 +190,11 @@ class V2rayShareLink(str):
                 heartbeatPeriod=inbound.get("heartbeatPeriod", 0),
                 keepAlivePeriod=inbound.get("keepAlivePeriod", 0),
                 xmux=inbound.get("xmux", {}),
+                pcs=inbound.get("pcs"),
+                vcn=inbound.get("vcn"),
+                xhttp_extra=inbound.get("xhttp_extra"),
+                downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "shadowsocks":
@@ -190,6 +240,11 @@ class V2rayShareLink(str):
             heartbeatPeriod: int = 0,
             keepAlivePeriod: int = 0,
             xmux: dict = {},
+            pcs=None,
+            vcn=None,
+            xhttp_extra=None,
+            downloadSettings=None,
+            xhttp_settings=None,
     ):
         payload = {
             "add": address,
@@ -218,6 +273,10 @@ class V2rayShareLink(str):
                 payload["fragment"] = fs
             if ais:
                 payload["allowInsecure"] = 1
+            if (pcs_str := _csv(pcs)):
+                payload["pcs"] = pcs_str
+            if (vcn_str := _csv(vcn)):
+                payload["vcn"] = vcn_str
 
         elif tls == "reality":
             payload["sni"] = sni
@@ -246,6 +305,15 @@ class V2rayShareLink(str):
             payload["type"] = mode
             if keepAlivePeriod > 0:
                 extra["keepAlivePeriod"] = keepAlivePeriod
+            # Full operator xhttpSettings (top-level form) wins over the
+            # synthesized defaults; the dedicated extra/downloadSettings
+            # paths below cover the envelope form.
+            extra.update(_operator_xhttp_extra(xhttp_settings))
+            # Operator-provided xhttp.extra wins over synthesized defaults.
+            if isinstance(xhttp_extra, dict):
+                extra.update(xhttp_extra)
+            if isinstance(downloadSettings, dict):
+                extra["downloadSettings"] = downloadSettings
             payload["extra"] = extra
 
         elif net == "ws":
@@ -289,6 +357,11 @@ class V2rayShareLink(str):
               heartbeatPeriod: int = 0,
               keepAlivePeriod: int = 0,
               xmux: dict = {},
+              pcs=None,
+              vcn=None,
+              xhttp_extra=None,
+              downloadSettings=None,
+              xhttp_settings=None,
               ):
 
         payload = {
@@ -326,6 +399,11 @@ class V2rayShareLink(str):
                 extra["keepAlivePeriod"] = keepAlivePeriod
             if xmux:
                 extra["xmux"] = xmux
+            extra.update(_operator_xhttp_extra(xhttp_settings))
+            if isinstance(xhttp_extra, dict):
+                extra.update(xhttp_extra)
+            if isinstance(downloadSettings, dict):
+                extra["downloadSettings"] = downloadSettings
             payload["extra"] = json.dumps(extra)
 
         elif net == 'kcp':
@@ -351,6 +429,10 @@ class V2rayShareLink(str):
                 payload["fragment"] = fs
             if ais:
                 payload["allowInsecure"] = 1
+            if (pcs_str := _csv(pcs)):
+                payload["pcs"] = pcs_str
+            if (vcn_str := _csv(vcn)):
+                payload["vcn"] = vcn_str
 
         elif tls == "reality":
             payload["sni"] = sni
@@ -397,6 +479,11 @@ class V2rayShareLink(str):
                heartbeatPeriod: int = 0,
                keepAlivePeriod: int = 0,
                xmux: dict = {},
+               pcs=None,
+               vcn=None,
+               xhttp_extra=None,
+               downloadSettings=None,
+               xhttp_settings=None,
                ):
 
         payload = {
@@ -430,6 +517,11 @@ class V2rayShareLink(str):
                 extra["keepAlivePeriod"] = keepAlivePeriod
             if xmux:
                 extra["xmux"] = xmux
+            extra.update(_operator_xhttp_extra(xhttp_settings))
+            if isinstance(xhttp_extra, dict):
+                extra.update(xhttp_extra)
+            if isinstance(downloadSettings, dict):
+                extra["downloadSettings"] = downloadSettings
             payload["extra"] = json.dumps(extra)
 
         elif net == 'quic':
@@ -459,6 +551,10 @@ class V2rayShareLink(str):
                 payload["fragment"] = fs
             if ais:
                 payload["allowInsecure"] = 1
+            if (pcs_str := _csv(pcs)):
+                payload["pcs"] = pcs_str
+            if (vcn_str := _csv(vcn)):
+                payload["vcn"] = vcn_str
         elif tls == "reality":
             payload["sni"] = sni
             payload["fp"] = fp
@@ -524,7 +620,8 @@ class V2rayJsonConfig(str):
         return json.dumps(self.config, indent=4, cls=UUIDEncoder)
 
     @staticmethod
-    def tls_config(sni=None, fp=None, alpn=None, ais: bool = False) -> dict:
+    def tls_config(sni=None, fp=None, alpn=None, ais: bool = False,
+                   pcs=None, vcn=None) -> dict:
 
         tlsSettings = {}
         if sni is not None:
@@ -537,6 +634,15 @@ class V2rayJsonConfig(str):
         if alpn:
             tlsSettings["alpn"] = [alpn] if not isinstance(
                 alpn, list) else alpn
+
+        if pcs:
+            tlsSettings["pinnedPeerCertSha256"] = (
+                pcs if isinstance(pcs, list) else [pcs]
+            )
+        if vcn:
+            tlsSettings["verifyPeerCertByName"] = (
+                vcn if isinstance(vcn, list) else [vcn]
+            )
 
         tlsSettings["show"] = False
 
@@ -602,8 +708,18 @@ class V2rayJsonConfig(str):
                          mode: str = "auto",
                          noGRPCHeader: bool = False,
                          keepAlivePeriod: int = 0,
+                         xhttp_extra=None,
+                         downloadSettings=None,
+                         xhttp_settings=None,
                          ) -> dict:
         config = copy.deepcopy(self.settings.get("splithttpSettings", {}))
+
+        # Layer the operator's full xhttpSettings (top-level form) onto the
+        # template first; the scalar handling below (mode/path/host, sc*
+        # setdefaults, random User-Agent) then refines it. host/path/mode
+        # and the extra/downloadSettings envelope are excluded here — they're
+        # set as dedicated keys further down. Empty for bare configs → no-op.
+        config.update(_operator_xhttp_extra(xhttp_settings))
 
         config["mode"] = mode
         if path:
@@ -622,6 +738,11 @@ class V2rayJsonConfig(str):
             config["xmux"] = xmux
         if keepAlivePeriod > 0:
             config["keepAlivePeriod"] = keepAlivePeriod
+        # Operator-provided xhttp `extra` + `downloadSettings` preserved verbatim.
+        if isinstance(xhttp_extra, dict):
+            config["extra"] = xhttp_extra
+        if isinstance(downloadSettings, dict):
+            config["downloadSettings"] = downloadSettings
         # core will ignore unknown variables
 
         return config
@@ -926,6 +1047,11 @@ class V2rayJsonConfig(str):
                             noGRPCHeader: bool = False,
                             heartbeatPeriod: int = 0,
                             keepAlivePeriod: int = 0,
+                            pcs=None,
+                            vcn=None,
+                            xhttp_extra=None,
+                            downloadSettings=None,
+                            xhttp_settings=None,
                             ) -> dict:
 
         if net == "ws":
@@ -959,12 +1085,16 @@ class V2rayJsonConfig(str):
                                                     mode=mode,
                                                     noGRPCHeader=noGRPCHeader,
                                                     keepAlivePeriod=keepAlivePeriod,
+                                                    xhttp_extra=xhttp_extra,
+                                                    downloadSettings=downloadSettings,
+                                                    xhttp_settings=xhttp_settings,
                                                     )
         else:
             network_setting = {}
 
         if tls == "tls":
-            tls_settings = self.tls_config(sni=sni, fp=fp, alpn=alpn, ais=ais)
+            tls_settings = self.tls_config(sni=sni, fp=fp, alpn=alpn, ais=ais,
+                                           pcs=pcs, vcn=vcn)
         elif tls == "reality":
             tls_settings = self.reality_config(
                 sni=sni, fp=fp, pbk=pbk, sid=sid, spx=spx)
@@ -1070,6 +1200,11 @@ class V2rayJsonConfig(str):
             noGRPCHeader=inbound.get("noGRPCHeader", False),
             heartbeatPeriod=inbound.get("heartbeatPeriod", 0),
             keepAlivePeriod=inbound.get("keepAlivePeriod", 0),
+            pcs=inbound.get("pcs"),
+            vcn=inbound.get("vcn"),
+            xhttp_extra=inbound.get("xhttp_extra"),
+            downloadSettings=inbound.get("downloadSettings"),
+            xhttp_settings=inbound.get("xhttp_settings"),
         )
 
         mux_json = json.loads(self.mux_template)

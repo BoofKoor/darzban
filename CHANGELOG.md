@@ -6,6 +6,66 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 this project does not strictly follow SemVer because compatibility with the
 upstream Marzban API surface takes precedence.
 
+## [Unreleased]
+
+### Subscription field fidelity (v0.10 Task 1, PR 1 — Track A)
+
+Pinned Xray core (`v26.2.6`) added `pinnedPeerCertSha256` /
+`verifyPeerCertByName` as the operator-defined replacement for the now-
+deprecating `allowInsecure`, and reworked xhttp/splithttp transports
+with operator-supplied `extra` + `downloadSettings` objects. Until now,
+**none of these reached the subscription link**: the inbound resolver
+flattened `streamSettings` into a fixed allow-list and the v2ray/v2ray-
+json emitters synthesized their own `extra` dict rather than passing
+the operator's through.
+
+This change wires four fields end-to-end for the v2ray base64 and
+v2ray-json formats:
+
+- **`pcs` / `vcn`** (URL params, lowercase) and the matching
+  `pinnedPeerCertSha256` / `verifyPeerCertByName` keys in v2ray-json
+  `tlsSettings`. Comma-joined for the URL when the core config supplies
+  a list; emitted only when set; emitted only on `tls` security (not
+  `reality`). v26.2.6 spelling confirmed against the upstream release
+  notes.
+- **xhttp `extra` (operator envelope object)** merged into the
+  synthesized defaults — operator-provided keys win key-by-key, the
+  synthesized scMax* / xPaddingBytes / noGRPCHeader / xmux /
+  keepAlivePeriod defaults remain for anything the operator didn't
+  override. Same path in v2ray-json's `splithttpSettings.extra`.
+- **`downloadSettings`** nested inside the URL-link `extra` JSON
+  (per XTLS share-link convention) and emitted as a top-level
+  `splithttpSettings.downloadSettings` key in v2ray-json.
+
+**Full xhttpSettings passthrough (real-server follow-up).** Testing a
+rich xhttp inbound on a live v26.2.6 core showed operators write most
+xhttp params **directly at the top level of `xhttpSettings`** (not
+wrapped in the `extra` envelope). The resolver's fixed allow-list
+dropped every one of them — `xPaddingObfsMode/Key/Header/Placement/
+Method`, `sessionPlacement/Key`, `seqPlacement/Key`,
+`scMaxBufferedPosts`, `scStreamUpServerSecs`, `noSSEHeader`, custom
+`headers`, `enableXmux`, and any future field. The resolver now stores
+the **entire `xhttpSettings` object** verbatim and the emitters merge
+it (minus the `host`/`path`/`mode` params carried separately, and minus
+the `extra`/`downloadSettings` envelope keys handled above) over the
+synthesized defaults — operator values win, defaults fill the rest.
+This is forward-compatible with v26.3+ xhttp fields with zero code
+change. Both the top-level form and the `extra` envelope form are
+supported; they do not double-handle each other.
+
+**Compatibility — no schema change in this PR.** Every field is
+optional; absent → key omitted → byte-for-byte identical output to
+v0.9.0 for every existing host. Locked by regression tests that call
+each emitter with the new kwargs at their defaults / `None` / `{}` /
+the bare `{path,host,mode}` dict and assert equality. PR 2 (Track B)
+follows separately with the `hosts.config_passthrough` column +
+migration for the full raw-config escape hatch.
+
+Out of scope this PR: REALITY `mldsa65` and VLESS post-quantum
+`encryption` (their schemas aren't documented for v26.2.6 — flagged for
+the next Xray bump); clash / clash-meta / sing-box / outline structured
+emission (separate track).
+
 ## [0.9.0] - 2026-05-30
 
 A stability-focused refresh of the panel. Four task tracks landed under
