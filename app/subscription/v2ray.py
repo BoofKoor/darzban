@@ -33,6 +33,30 @@ def _csv(value) -> str:
     return str(value)
 
 
+# xhttp keys handled OUTSIDE the operator-passthrough merge:
+#   - host/path/mode are carried as their own URL params (and as
+#     top-level splithttpSettings keys in v2ray-json), so they must not
+#     be duplicated inside the merged `extra` object. Per the Xray xhttp
+#     schema, when `extra` exists only host/path/mode/extra take effect.
+#   - `extra` (envelope sub-object) and `downloadSettings` are emitted by
+#     the dedicated xhttp_extra / downloadSettings paths (PR 1); excluding
+#     them here keeps the two code paths from double-handling the same key.
+_XHTTP_PASSTHROUGH_EXCLUDE = ("host", "path", "mode", "extra", "downloadSettings")
+
+
+def _operator_xhttp_extra(xhttp_settings) -> dict:
+    """Operator's full xhttpSettings minus the keys emitted elsewhere
+    (host/path/mode params + extra/downloadSettings dedicated paths).
+    Returns {} when nothing was provided so the synthesized defaults
+    stand unchanged (bare-config byte-identity)."""
+    if not isinstance(xhttp_settings, dict):
+        return {}
+    return {
+        k: v for k, v in xhttp_settings.items()
+        if k not in _XHTTP_PASSTHROUGH_EXCLUDE
+    }
+
+
 class V2rayShareLink(str):
     def __init__(self):
         self.links = []
@@ -96,6 +120,7 @@ class V2rayShareLink(str):
                 vcn=inbound.get("vcn"),
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "vless":
@@ -132,6 +157,7 @@ class V2rayShareLink(str):
                 vcn=inbound.get("vcn"),
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "trojan":
@@ -168,6 +194,7 @@ class V2rayShareLink(str):
                 vcn=inbound.get("vcn"),
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
+                xhttp_settings=inbound.get("xhttp_settings"),
             )
 
         elif inbound["protocol"] == "shadowsocks":
@@ -217,6 +244,7 @@ class V2rayShareLink(str):
             vcn=None,
             xhttp_extra=None,
             downloadSettings=None,
+            xhttp_settings=None,
     ):
         payload = {
             "add": address,
@@ -277,6 +305,10 @@ class V2rayShareLink(str):
             payload["type"] = mode
             if keepAlivePeriod > 0:
                 extra["keepAlivePeriod"] = keepAlivePeriod
+            # Full operator xhttpSettings (top-level form) wins over the
+            # synthesized defaults; the dedicated extra/downloadSettings
+            # paths below cover the envelope form.
+            extra.update(_operator_xhttp_extra(xhttp_settings))
             # Operator-provided xhttp.extra wins over synthesized defaults.
             if isinstance(xhttp_extra, dict):
                 extra.update(xhttp_extra)
@@ -329,6 +361,7 @@ class V2rayShareLink(str):
               vcn=None,
               xhttp_extra=None,
               downloadSettings=None,
+              xhttp_settings=None,
               ):
 
         payload = {
@@ -366,6 +399,7 @@ class V2rayShareLink(str):
                 extra["keepAlivePeriod"] = keepAlivePeriod
             if xmux:
                 extra["xmux"] = xmux
+            extra.update(_operator_xhttp_extra(xhttp_settings))
             if isinstance(xhttp_extra, dict):
                 extra.update(xhttp_extra)
             if isinstance(downloadSettings, dict):
@@ -449,6 +483,7 @@ class V2rayShareLink(str):
                vcn=None,
                xhttp_extra=None,
                downloadSettings=None,
+               xhttp_settings=None,
                ):
 
         payload = {
@@ -482,6 +517,7 @@ class V2rayShareLink(str):
                 extra["keepAlivePeriod"] = keepAlivePeriod
             if xmux:
                 extra["xmux"] = xmux
+            extra.update(_operator_xhttp_extra(xhttp_settings))
             if isinstance(xhttp_extra, dict):
                 extra.update(xhttp_extra)
             if isinstance(downloadSettings, dict):
@@ -674,8 +710,16 @@ class V2rayJsonConfig(str):
                          keepAlivePeriod: int = 0,
                          xhttp_extra=None,
                          downloadSettings=None,
+                         xhttp_settings=None,
                          ) -> dict:
         config = copy.deepcopy(self.settings.get("splithttpSettings", {}))
+
+        # Layer the operator's full xhttpSettings (top-level form) onto the
+        # template first; the scalar handling below (mode/path/host, sc*
+        # setdefaults, random User-Agent) then refines it. host/path/mode
+        # and the extra/downloadSettings envelope are excluded here — they're
+        # set as dedicated keys further down. Empty for bare configs → no-op.
+        config.update(_operator_xhttp_extra(xhttp_settings))
 
         config["mode"] = mode
         if path:
@@ -1007,6 +1051,7 @@ class V2rayJsonConfig(str):
                             vcn=None,
                             xhttp_extra=None,
                             downloadSettings=None,
+                            xhttp_settings=None,
                             ) -> dict:
 
         if net == "ws":
@@ -1042,6 +1087,7 @@ class V2rayJsonConfig(str):
                                                     keepAlivePeriod=keepAlivePeriod,
                                                     xhttp_extra=xhttp_extra,
                                                     downloadSettings=downloadSettings,
+                                                    xhttp_settings=xhttp_settings,
                                                     )
         else:
             network_setting = {}
@@ -1158,6 +1204,7 @@ class V2rayJsonConfig(str):
             vcn=inbound.get("vcn"),
             xhttp_extra=inbound.get("xhttp_extra"),
             downloadSettings=inbound.get("downloadSettings"),
+            xhttp_settings=inbound.get("xhttp_settings"),
         )
 
         mux_json = json.loads(self.mux_template)

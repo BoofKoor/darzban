@@ -28,22 +28,38 @@ v2ray-json formats:
   a list; emitted only when set; emitted only on `tls` security (not
   `reality`). v26.2.6 spelling confirmed against the upstream release
   notes.
-- **xhttp `extra` (operator object)** merged into the synthesized
-  defaults — operator-provided keys win key-by-key, the synthesized
-  scMax* / xPaddingBytes / noGRPCHeader / xmux / keepAlivePeriod
-  defaults remain for anything the operator didn't override. Same path
-  in v2ray-json's `splithttpSettings.extra`.
+- **xhttp `extra` (operator envelope object)** merged into the
+  synthesized defaults — operator-provided keys win key-by-key, the
+  synthesized scMax* / xPaddingBytes / noGRPCHeader / xmux /
+  keepAlivePeriod defaults remain for anything the operator didn't
+  override. Same path in v2ray-json's `splithttpSettings.extra`.
 - **`downloadSettings`** nested inside the URL-link `extra` JSON
   (per XTLS share-link convention) and emitted as a top-level
   `splithttpSettings.downloadSettings` key in v2ray-json.
 
-**Compatibility — no schema change in this PR.** The four fields are
+**Full xhttpSettings passthrough (real-server follow-up).** Testing a
+rich xhttp inbound on a live v26.2.6 core showed operators write most
+xhttp params **directly at the top level of `xhttpSettings`** (not
+wrapped in the `extra` envelope). The resolver's fixed allow-list
+dropped every one of them — `xPaddingObfsMode/Key/Header/Placement/
+Method`, `sessionPlacement/Key`, `seqPlacement/Key`,
+`scMaxBufferedPosts`, `scStreamUpServerSecs`, `noSSEHeader`, custom
+`headers`, `enableXmux`, and any future field. The resolver now stores
+the **entire `xhttpSettings` object** verbatim and the emitters merge
+it (minus the `host`/`path`/`mode` params carried separately, and minus
+the `extra`/`downloadSettings` envelope keys handled above) over the
+synthesized defaults — operator values win, defaults fill the rest.
+This is forward-compatible with v26.3+ xhttp fields with zero code
+change. Both the top-level form and the `extra` envelope form are
+supported; they do not double-handle each other.
+
+**Compatibility — no schema change in this PR.** Every field is
 optional; absent → key omitted → byte-for-byte identical output to
-v0.9.0 for every existing host. Locked by a regression test that calls
-each emitter with the new kwargs at their defaults and with them
-explicitly `None`, asserting equality. PR 2 (Track B) follows separately
-with the `hosts.config_passthrough` column + migration for full
-raw-config escape hatch.
+v0.9.0 for every existing host. Locked by regression tests that call
+each emitter with the new kwargs at their defaults / `None` / `{}` /
+the bare `{path,host,mode}` dict and assert equality. PR 2 (Track B)
+follows separately with the `hosts.config_passthrough` column +
+migration for the full raw-config escape hatch.
 
 Out of scope this PR: REALITY `mldsa65` and VLESS post-quantum
 `encryption` (their schemas aren't documented for v26.2.6 — flagged for

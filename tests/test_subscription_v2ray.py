@@ -318,3 +318,215 @@ def test_resolve_inbounds_xhttp_and_splithttp_both_parsed(tmp_path, net):
     parsed = cfg.inbounds_by_tag[f"vless-{net}"]
     assert parsed["xhttp_extra"] == {"k": "v"}
     assert parsed["downloadSettings"] == {"address": "dl"}
+
+
+# =====================================================================
+# PR 1.5 — full xhttpSettings passthrough (top-level form).
+#
+# Operators commonly write rich xhttp params directly at the top level
+# of xhttpSettings (no `extra` envelope). The resolver's fixed
+# allow-list used to drop everything outside ~10 scalars; PR 1.5 stores
+# the whole object and the emitters merge it over the synthesized
+# defaults. Bare configs must stay byte-identical.
+# =====================================================================
+
+
+# The user's real-server inbound: every field set at the TOP LEVEL of
+# xhttpSettings (NOT wrapped in `extra`). scMaxConcurrentPosts is left
+# unset so we can prove the synthesized default still fills it.
+RICH_XHTTP = {
+    "path": "/foo",
+    "host": "example.com",
+    "mode": "stream-up",
+    "xPaddingObfsMode": "header",
+    "xPaddingObfsKey": "obfs-key",
+    "xPaddingObfsHeader": "X-Pad",
+    "xPaddingObfsPlacement": "header",
+    "xPaddingObfsMethod": "aes",
+    "sessionPlacement": "query",
+    "sessionKey": "sess",
+    "seqPlacement": "header",
+    "seqKey": "seq",
+    "scMaxBufferedPosts": 30,
+    "scStreamUpServerSecs": "20-80",
+    "noSSEHeader": True,
+    "headers": {"X-Custom": "v"},
+    "enableXmux": True,
+}
+
+# Every operator key minus the host/path/mode params that are carried
+# separately. These must all surface in the emitted config.
+_RICH_PASSTHROUGH_KEYS = {
+    k for k in RICH_XHTTP if k not in ("host", "path", "mode")
+}
+
+
+def _xhttp_settings_from(net, tmp_path, port, xhttp):
+    """Resolve a single xhttp/splithttp inbound and return its parsed
+    inbound dict (what process_inbounds_and_tags would feed emitters)."""
+    inbound = {
+        "tag": f"vless-{net}-rich",
+        "port": 443,
+        "protocol": "vless",
+        "settings": {"clients": []},
+        "streamSettings": {
+            "network": net,
+            "security": "tls",
+            "tlsSettings": {},
+            f"{net}Settings": xhttp,
+        },
+    }
+    cfg = XRayConfig(_write_config(tmp_path, inbound), api_port=port)
+    return cfg.inbounds_by_tag[f"vless-{net}-rich"]
+
+
+# --- parse: full object preserved ------------------------------------
+
+
+def test_resolve_inbounds_stores_full_xhttp_settings(tmp_path):
+    parsed = _xhttp_settings_from("xhttp", tmp_path, 18100, RICH_XHTTP)
+    assert parsed["xhttp_settings"] == RICH_XHTTP
+    # The legacy scalar allow-list still co-exists for the defaults.
+    assert parsed["mode"] == "stream-up"
+
+
+def test_resolve_inbounds_xhttp_settings_is_a_copy(tmp_path):
+    # Mutating the parsed copy must not corrupt anything shared.
+    parsed = _xhttp_settings_from("xhttp", tmp_path, 18101, dict(RICH_XHTTP))
+    parsed["xhttp_settings"]["headers"]["X-Custom"] = "mutated"
+    # Re-resolve a fresh config; original literal is untouched.
+    assert RICH_XHTTP["headers"]["X-Custom"] == "v"
+
+
+# --- emit (v2ray base64): top-level fields land in extra= JSON -------
+
+
+def test_vless_xhttp_full_passthrough_into_extra():
+    link = V2rayShareLink.vless(
+        **_vless_args(tls="tls", pbk="", sid="", flow=""),
+        xhttp_settings=RICH_XHTTP,
+    )
+    params = dict(urlparse.parse_qsl(urlparse.urlparse(link).query))
+    extra = json.loads(params["extra"])
+    # Every operator field (minus host/path/mode) is present.
+    for k in _RICH_PASSTHROUGH_KEYS:
+        assert k in extra, f"{k} dropped from extra"
+        assert extra[k] == RICH_XHTTP[k]
+    # host/path/mode are NOT duplicated inside extra (they're URL params).
+    assert "host" not in extra
+    assert "path" not in extra
+    assert "mode" not in extra
+    # Synthesized default still fills the field the operator didn't set.
+    assert extra["scMaxConcurrentPosts"] == 100
+
+
+def test_vmess_xhttp_full_passthrough_into_extra_dict():
+    import base64
+    link = V2rayShareLink.vmess(
+        remark=REMARK, address=ADDR, port=PORT, id=UID,
+        net="xhttp", path="/foo", host="example.com",
+        tls="tls", sni=SNI, fp="chrome",
+        xhttp_settings=RICH_XHTTP,
+    )
+    payload = json.loads(base64.b64decode(link.removeprefix("vmess://")).decode())
+    extra = payload["extra"]
+    for k in _RICH_PASSTHROUGH_KEYS:
+        assert extra[k] == RICH_XHTTP[k]
+    assert "host" not in extra and "path" not in extra and "mode" not in extra
+
+
+def test_trojan_xhttp_full_passthrough_into_extra():
+    link = V2rayShareLink.trojan(
+        remark=REMARK, address=ADDR, port=PORT, password=PWD,
+        net="xhttp", path="/foo", host="example.com",
+        tls="tls", sni=SNI, fp="chrome",
+        xhttp_settings=RICH_XHTTP,
+    )
+    params = dict(urlparse.parse_qsl(urlparse.urlparse(link).query))
+    extra = json.loads(params["extra"])
+    for k in _RICH_PASSTHROUGH_KEYS:
+        assert extra[k] == RICH_XHTTP[k]
+
+
+# --- emit (v2ray-json): top-level fields land in splithttpSettings ---
+
+
+def test_splithttp_config_full_passthrough_top_level():
+    cfg = V2rayJsonConfig().splithttp_config(
+        path="/foo", host="example.com", mode="stream-up",
+        xhttp_settings=RICH_XHTTP,
+    )
+    for k in _RICH_PASSTHROUGH_KEYS:
+        assert cfg[k] == RICH_XHTTP[k], f"{k} missing from splithttpSettings"
+    # Dedicated scalars still set.
+    assert cfg["mode"] == "stream-up"
+    assert cfg["path"] == "/foo"
+    assert cfg["host"] == "example.com"
+    # Synthesized default fills the unset field.
+    assert cfg["scMaxConcurrentPosts"] == 100
+
+
+# --- operator precedence ---------------------------------------------
+
+
+def test_operator_xhttp_setting_overrides_synthesized_default():
+    # Operator sets scMaxConcurrentPosts at top level → must win over the
+    # hardcoded 100 default in both formats.
+    xhttp = dict(RICH_XHTTP, scMaxConcurrentPosts=7)
+    link = V2rayShareLink.vless(
+        **_vless_args(tls="tls", pbk="", sid="", flow=""),
+        xhttp_settings=xhttp,
+    )
+    extra = json.loads(dict(urlparse.parse_qsl(urlparse.urlparse(link).query))["extra"])
+    assert extra["scMaxConcurrentPosts"] == 7
+
+    cfg = V2rayJsonConfig().splithttp_config(
+        path="/foo", host="example.com", xhttp_settings=xhttp,
+    )
+    assert cfg["scMaxConcurrentPosts"] == 7
+
+
+# --- byte-identity: bare configs unchanged by the new kwarg ----------
+
+
+def test_vless_xhttp_bare_config_byte_identical_with_passthrough_kwarg():
+    # Bare xhttp (only path/host) → _operator_xhttp_extra strips all three
+    # → empty merge → output identical whether xhttp_settings is omitted,
+    # None, {}, or the bare {path, host, mode} dict.
+    base = _vless_args(tls="tls", pbk="", sid="", flow="")
+    omitted = V2rayShareLink.vless(**base)
+    explicit_none = V2rayShareLink.vless(**base, xhttp_settings=None)
+    empty = V2rayShareLink.vless(**base, xhttp_settings={})
+    bare = V2rayShareLink.vless(
+        **base, xhttp_settings={"path": "/foo", "host": "example.com", "mode": "auto"}
+    )
+    assert omitted == explicit_none == empty == bare
+
+
+def test_splithttp_config_bare_byte_identical_with_passthrough_kwarg():
+    cfg_omitted = V2rayJsonConfig().splithttp_config(path="/foo", host="example.com")
+    cfg_none = V2rayJsonConfig().splithttp_config(
+        path="/foo", host="example.com", xhttp_settings=None)
+    cfg_bare = V2rayJsonConfig().splithttp_config(
+        path="/foo", host="example.com",
+        xhttp_settings={"path": "/foo", "host": "example.com", "mode": "auto"})
+    assert cfg_omitted == cfg_none == cfg_bare
+
+
+# --- envelope form (PR 1) still works alongside top-level form -------
+
+
+def test_envelope_form_extra_not_double_nested():
+    # When the operator used the `extra` envelope (form b), xhttp_settings
+    # ALSO contains that `extra` key. It must NOT be merged as a nested
+    # `extra.extra`; PR 1's xhttp_extra path spreads it instead.
+    envelope = {"path": "/foo", "host": "example.com", "mode": "auto",
+                "extra": {"noSSEHeader": True}}
+    link = V2rayShareLink.vless(
+        **_vless_args(tls="tls", pbk="", sid="", flow=""),
+        xhttp_settings=envelope,
+        xhttp_extra=envelope["extra"],
+    )
+    extra = json.loads(dict(urlparse.parse_qsl(urlparse.urlparse(link).query))["extra"])
+    assert "extra" not in extra          # no double-nesting
+    assert extra["noSSEHeader"] is True  # envelope contents spread in

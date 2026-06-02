@@ -328,6 +328,7 @@ def process_inbounds_and_tags(
                         "vcn": inbound.get("vcn"),
                         "xhttp_extra": inbound.get("xhttp_extra"),
                         "downloadSettings": inbound.get("downloadSettings"),
+                        "xhttp_settings": inbound.get("xhttp_settings"),
                     }
                 )
 
