@@ -197,6 +197,9 @@ class XRayConfig(dict):
                     # settings['fp']
                     # settings['alpn']
                     settings['tls'] = 'tls'
+                    # v26.2.6 — operator-defined cert pinning (replaces allowInsecure)
+                    settings['pcs'] = tls_settings.get('pinnedPeerCertSha256')
+                    settings['vcn'] = tls_settings.get('verifyPeerCertByName')
                     for certificate in tls_settings.get('certificates', []):
 
                         if certificate.get("certificateFile", None):
@@ -311,6 +314,10 @@ class XRayConfig(dict):
                     settings["mode"] = net_settings.get("mode", "auto")
                     settings["noGRPCHeader"] = net_settings.get("noGRPCHeader", False)
                     settings["keepAlivePeriod"] = net_settings.get("keepAlivePeriod", 0)
+                    # Operator's raw xhttp `extra` + `downloadSettings` objects, preserved
+                    # for verbatim emission. Absent → key omitted, behaviour unchanged.
+                    settings['xhttp_extra'] = net_settings.get('extra')
+                    settings['downloadSettings'] = net_settings.get('downloadSettings')
 
                 elif net == 'kcp':
                     header = net_settings.get('header', {})
