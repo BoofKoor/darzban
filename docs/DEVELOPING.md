@@ -94,9 +94,9 @@ Single-worker is enforced — setting `UVICORN_WORKERS>1` or
 ## Pinning the Xray binary at build time
 
 ```bash
-docker build --build-arg XRAY_VERSION=v26.2.6 -t marzban .
+docker build --build-arg XRAY_VERSION=v26.5.9 -t marzban .
 # or
-XRAY_VERSION=v26.2.6 bash scripts/install_xray.sh
+XRAY_VERSION=v26.5.9 bash scripts/install_xray.sh
 ```
 
 The default version is kept in sync between `Dockerfile` (the

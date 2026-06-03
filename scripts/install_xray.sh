@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-DEFAULT_VERSION="v26.2.6"
+DEFAULT_VERSION="v26.5.9"
 VERSION="${XRAY_VERSION:-$DEFAULT_VERSION}"
 
 while [[ $# -gt 0 ]]; do
