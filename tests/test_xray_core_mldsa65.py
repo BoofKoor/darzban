@@ -12,7 +12,7 @@ The Verify key feeds the client's `realitySettings.mldsa65Verify`
 
 from unittest.mock import patch
 
-from app.xray.core import XRayCore
+from app.xray.core import get_mldsa65
 
 
 # Verbatim label shape from the v26.5.9 binary. The Verify key is
@@ -25,10 +25,8 @@ V26_5_9_OUTPUT = (
 
 
 def _run(output: str):
-    core = XRayCore.__new__(XRayCore)
-    core.executable_path = "/usr/bin/xray"
     with patch("app.xray.core.subprocess.check_output", return_value=output.encode("utf-8")):
-        return core.get_mldsa65(seed="any-seed-stub")
+        return get_mldsa65(seed="any-seed-stub")
 
 
 def test_get_mldsa65_parses_v26_5_9_output():
