@@ -8,6 +8,8 @@ upstream Marzban API surface takes precedence.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-06-03
+
 ### Added
 
 - **REALITY post-quantum `mldsa65Verify` emission.** The resolver now
