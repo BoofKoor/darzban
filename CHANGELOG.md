@@ -6,7 +6,7 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 this project does not strictly follow SemVer because compatibility with the
 upstream Marzban API surface takes precedence.
 
-## [Unreleased]
+## [0.10.1] - 2026-06-03
 
 ### Changed
 
