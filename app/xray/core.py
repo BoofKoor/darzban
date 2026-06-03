@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import atexit
 import re
 import subprocess
@@ -5,10 +7,36 @@ import threading
 from collections import deque
 from contextlib import contextmanager
 from functools import cached_property
+from typing import TYPE_CHECKING
 
 from app import logger
-from app.xray.config import XRayConfig
-from config import DEBUG
+from config import DEBUG, XRAY_EXECUTABLE_PATH
+
+if TYPE_CHECKING:
+    from app.xray.config import XRayConfig
+
+
+def get_mldsa65(seed: str, executable_path: str = XRAY_EXECUTABLE_PATH):
+    """Derive REALITY mldsa65 verify key from the operator-supplied seed.
+
+    Module-level (not a method on XRayCore) so the resolver can import it
+    directly via `from app.xray.core import get_mldsa65` at module top
+    without routing through `app.xray.__getattr__` — which would
+    recursively re-enter `_initialize()` during XRayConfig construction.
+    """
+    cmd = [executable_path, "mldsa65", "-i", seed]
+    output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode("utf-8")
+    # `xray mldsa65 -i <seed>` output (v26.5.9):
+    #   Seed:   <base64.RawURLEncoding>
+    #   Verify: <base64.RawURLEncoding, ~2400 chars>
+    seed_m = re.search(r"^Seed:\s*(\S+)", output, re.MULTILINE)
+    verify_m = re.search(r"^Verify:\s*(\S+)", output, re.MULTILINE)
+    if seed_m and verify_m:
+        return {
+            "seed": seed_m.group(1),
+            "verify": verify_m.group(1),
+        }
+    return None
 
 
 class XRayCore:

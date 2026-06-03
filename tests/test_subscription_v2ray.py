@@ -52,17 +52,17 @@ def test_vless_xhttp_reality_no_modern_fields_byte_for_byte():
     no_kwargs = V2rayShareLink.vless(**_vless_args())
     explicit_none = V2rayShareLink.vless(
         **_vless_args(),
-        pcs=None, vcn=None, xhttp_extra=None, downloadSettings=None,
+        pcs=None, vcn=None, xhttp_extra=None, downloadSettings=None, pqv="",
     )
     assert no_kwargs == explicit_none
 
-    # And the URL must NOT contain encryption / pcs / vcn / mldsa65 today.
+    # And the URL must NOT contain encryption / pcs / vcn / pqv today.
     q = urlparse.urlparse(no_kwargs).query
     params = dict(urlparse.parse_qsl(q))
     assert "encryption" not in params
     assert "pcs" not in params
     assert "vcn" not in params
-    assert "mldsa65" not in params
+    assert "pqv" not in params
 
     # extra JSON must contain only the synthesized keys (no operator keys).
     extra = json.loads(params["extra"])
@@ -530,3 +530,119 @@ def test_envelope_form_extra_not_double_nested():
     extra = json.loads(dict(urlparse.parse_qsl(urlparse.urlparse(link).query))["extra"])
     assert "extra" not in extra          # no double-nesting
     assert extra["noSSEHeader"] is True  # envelope contents spread in
+
+
+# =====================================================================
+# REALITY post-quantum mldsa65 — URL `pqv=<verify>` param +
+# v2ray-json `realitySettings.mldsa65Verify`. Operator's xray inbound
+# carries `realitySettings.mldsa65Seed`; the resolver derives the
+# verify key via `xray mldsa65 -i <seed>` and threads it as `pqv`.
+# =====================================================================
+
+
+# Stand-in for the ~2400-char verify blob; the emitter is value-agnostic.
+PQV_STUB = "Verify-Stub-Base64URL-Encoded"
+
+
+def test_vless_reality_emits_pqv_when_present():
+    link = V2rayShareLink.vless(
+        **_vless_args(),
+        pqv=PQV_STUB,
+    )
+    params = dict(urlparse.parse_qsl(urlparse.urlparse(link).query))
+    assert params["pqv"] == PQV_STUB
+
+
+def test_trojan_reality_emits_pqv_when_present():
+    link = V2rayShareLink.trojan(
+        remark=REMARK, address=ADDR, port=PORT, password=PWD,
+        net="tcp", path="", host="example.com",
+        tls="reality", sni=SNI, fp="chrome", pbk=PBK, sid=SID, spx="",
+        pqv=PQV_STUB,
+    )
+    params = dict(urlparse.parse_qsl(urlparse.urlparse(link).query))
+    assert params["pqv"] == PQV_STUB
+
+
+def test_vmess_reality_emits_pqv_when_present():
+    import base64
+    link = V2rayShareLink.vmess(
+        remark=REMARK, address=ADDR, port=PORT, id=UID,
+        net="tcp", path="", host="example.com",
+        tls="reality", sni=SNI, fp="chrome", pbk=PBK, sid=SID, spx="",
+        pqv=PQV_STUB,
+    )
+    payload = json.loads(base64.b64decode(link.removeprefix("vmess://")).decode())
+    assert payload["pqv"] == PQV_STUB
+
+
+def test_pqv_only_on_reality_not_tls():
+    # `pqv` is REALITY-only; setting it under tls=tls must not leak it.
+    link = V2rayShareLink.vless(
+        **_vless_args(tls="tls", pbk="", sid="", flow=""),
+        pqv=PQV_STUB,
+    )
+    params = dict(urlparse.parse_qsl(urlparse.urlparse(link).query))
+    assert "pqv" not in params
+
+
+def test_reality_config_emits_mldsa65verify_when_present():
+    out = V2rayJsonConfig.reality_config(
+        sni=SNI, fp="chrome", pbk=PBK, sid=SID,
+        mldsa65Verify=PQV_STUB,
+    )
+    assert out["mldsa65Verify"] == PQV_STUB
+
+
+def test_reality_config_omits_mldsa65verify_when_absent():
+    out = V2rayJsonConfig.reality_config(
+        sni=SNI, fp="chrome", pbk=PBK, sid=SID,
+    )
+    assert "mldsa65Verify" not in out
+
+
+def test_resolve_inbounds_parses_mldsa65_seed(tmp_path):
+    # Parser stores the seed verbatim under `mldsa65_seed`. The verify-key
+    # derivation calls into XRayCore which we don't exercise here; we just
+    # confirm the seed reaches the parsed inbound dict.
+    inbound = {
+        "tag": "vless-reality-pq",
+        "port": 443,
+        "protocol": "vless",
+        "settings": {"clients": []},
+        "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "realitySettings": {
+                "serverNames": ["example.com"],
+                "publicKey": PBK,
+                "shortIds": [SID],
+                "mldsa65Seed": "seed-stub-base64url",
+            },
+        },
+    }
+    cfg = XRayConfig(_write_config(tmp_path, inbound), api_port=18200)
+    parsed = cfg.inbounds_by_tag["vless-reality-pq"]
+    assert parsed["mldsa65_seed"] == "seed-stub-base64url"
+
+
+def test_resolve_inbounds_absent_mldsa65_seed_is_absent(tmp_path):
+    inbound = {
+        "tag": "vless-reality-no-pq",
+        "port": 443,
+        "protocol": "vless",
+        "settings": {"clients": []},
+        "streamSettings": {
+            "network": "tcp",
+            "security": "reality",
+            "realitySettings": {
+                "serverNames": ["example.com"],
+                "publicKey": PBK,
+                "shortIds": [SID],
+            },
+        },
+    }
+    cfg = XRayConfig(_write_config(tmp_path, inbound), api_port=18201)
+    parsed = cfg.inbounds_by_tag["vless-reality-no-pq"]
+    assert "mldsa65_seed" not in parsed
+    assert "pqv" not in parsed

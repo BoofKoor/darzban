@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import PosixPath
@@ -14,6 +15,9 @@ from app.db import models as db_models
 from app.models.proxy import ProxyTypes
 from app.models.user import UserStatus
 from app.utils.crypto import get_cert_SANs
+# Direct submodule import — bypasses `app.xray.__getattr__('core')`, which
+# would re-enter `_initialize()` during XRayConfig construction and recurse.
+from app.xray.core import get_mldsa65 as _get_mldsa65
 from config import DEBUG, XRAY_EXCLUDE_INBOUND_TAGS, XRAY_FALLBACKS_INBOUND_TAG
 
 
@@ -249,6 +253,22 @@ class XRayConfig(dict):
                         settings['spx'] = tls_settings.get('SpiderX')
                     except:
                         settings['spx'] = ""
+
+                    seed = tls_settings.get('mldsa65Seed')
+                    if seed:
+                        settings['mldsa65_seed'] = seed
+                        # Derivation is best-effort: the binary may not be
+                        # available at parse time (e.g. CI without xray
+                        # installed), and the regex may not match if a
+                        # future Xray release changes the labels. The seed
+                        # is preserved either way; only `pqv` is gated on a
+                        # successful derive.
+                        try:
+                            m = _get_mldsa65(seed)
+                        except (FileNotFoundError, subprocess.SubprocessError):
+                            m = None
+                        if m is not None:
+                            settings['pqv'] = m['verify']
 
                 if net in ('tcp', 'raw'):
                     header = net_settings.get('header', {})
