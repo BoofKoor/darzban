@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import defaultdict
 from copy import deepcopy
 from pathlib import PosixPath
@@ -253,12 +254,16 @@ class XRayConfig(dict):
                     seed = tls_settings.get('mldsa65Seed')
                     if seed:
                         settings['mldsa65_seed'] = seed
+                        # Derivation is best-effort: the binary may not be
+                        # available at parse time (e.g. CI without xray
+                        # installed). The seed is preserved either way; only
+                        # `pqv` is gated on a successful derive.
                         try:
                             from app.xray import core
                             m = core.get_mldsa65(seed)
                             if m:
                                 settings['pqv'] = m['verify']
-                        except ImportError:
+                        except (ImportError, FileNotFoundError, subprocess.SubprocessError):
                             pass
 
                 if net in ('tcp', 'raw'):
