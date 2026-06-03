@@ -6,6 +6,28 @@ The format is loosely based on [Keep a Changelog](https://keepachangelog.com/en/
 this project does not strictly follow SemVer because compatibility with the
 upstream Marzban API surface takes precedence.
 
+## [Unreleased]
+
+### Added
+
+- **REALITY post-quantum `mldsa65Verify` emission.** The resolver now
+  parses `streamSettings.realitySettings.mldsa65Seed` from xray
+  inbounds (per the v26.5.9 REALITY post-quantum signature docs),
+  derives the matching verify key via `xray mldsa65 -i <seed>` through
+  a new `XRayCore.get_mldsa65()` helper, and threads it as `pqv` from
+  the per-inbound parse dict through the host-merge into the v2ray /
+  v2ray-json emitters. v2ray base64 share links gain `pqv=<verify>`
+  on REALITY inbounds (vmess/vless/trojan); v2ray-json
+  `realitySettings` gains `mldsa65Verify: <verify>`. Both are
+  conditional — absent / empty → key omitted → output byte-identical
+  to pre-PR for any reality inbound that did not configure
+  `mldsa65Seed`. URL share-link param spelling (`pqv`) per Xray-core
+  REALITY spec issue #716 §4.4.7; v2ray-json key (`mldsa65Verify`)
+  per upstream client schema. VLESS post-quantum `encryption` is
+  tracked separately (`xray vlessenc` has no derive mode; the
+  decryption/encryption pair is generated atomically and requires a
+  schema-level decision on how the operator supplies the client value).
+
 ## [0.10.1] - 2026-06-03
 
 ### Changed

@@ -250,6 +250,17 @@ class XRayConfig(dict):
                     except:
                         settings['spx'] = ""
 
+                    seed = tls_settings.get('mldsa65Seed')
+                    if seed:
+                        settings['mldsa65_seed'] = seed
+                        try:
+                            from app.xray import core
+                            m = core.get_mldsa65(seed)
+                            if m:
+                                settings['pqv'] = m['verify']
+                        except ImportError:
+                            pass
+
                 if net in ('tcp', 'raw'):
                     header = net_settings.get('header', {})
                     request = header.get('request', {})

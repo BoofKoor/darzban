@@ -67,6 +67,22 @@ class XRayCore:
                 "public_key": pub.group(1),
             }
 
+    def get_mldsa65(self, seed: str = None):
+        cmd = [self.executable_path, "mldsa65"]
+        if seed:
+            cmd.extend(['-i', seed])
+        output = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8')
+        # `xray mldsa65` output (v26.5.9):
+        #   Seed:   <base64.RawURLEncoding>
+        #   Verify: <base64.RawURLEncoding, ~2400 chars>
+        seed_m = re.search(r'^Seed:\s*(\S+)', output, re.MULTILINE)
+        verify_m = re.search(r'^Verify:\s*(\S+)', output, re.MULTILINE)
+        if seed_m and verify_m:
+            return {
+                "seed": seed_m.group(1),
+                "verify": verify_m.group(1),
+            }
+
     def __capture_process_logs(self):
         def capture_and_debug_log():
             while self.process:

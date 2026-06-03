@@ -121,6 +121,7 @@ class V2rayShareLink(str):
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
                 xhttp_settings=inbound.get("xhttp_settings"),
+                pqv=inbound.get("pqv", ""),
             )
 
         elif inbound["protocol"] == "vless":
@@ -158,6 +159,7 @@ class V2rayShareLink(str):
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
                 xhttp_settings=inbound.get("xhttp_settings"),
+                pqv=inbound.get("pqv", ""),
             )
 
         elif inbound["protocol"] == "trojan":
@@ -195,6 +197,7 @@ class V2rayShareLink(str):
                 xhttp_extra=inbound.get("xhttp_extra"),
                 downloadSettings=inbound.get("downloadSettings"),
                 xhttp_settings=inbound.get("xhttp_settings"),
+                pqv=inbound.get("pqv", ""),
             )
 
         elif inbound["protocol"] == "shadowsocks":
@@ -245,6 +248,7 @@ class V2rayShareLink(str):
             xhttp_extra=None,
             downloadSettings=None,
             xhttp_settings=None,
+            pqv="",
     ):
         payload = {
             "add": address,
@@ -285,6 +289,8 @@ class V2rayShareLink(str):
             payload["sid"] = sid
             if spx:
                 payload["spx"] = spx
+            if pqv:
+                payload["pqv"] = pqv
 
         if net == "grpc":
             if multiMode:
@@ -362,6 +368,7 @@ class V2rayShareLink(str):
               xhttp_extra=None,
               downloadSettings=None,
               xhttp_settings=None,
+              pqv="",
               ):
 
         payload = {
@@ -441,6 +448,8 @@ class V2rayShareLink(str):
             payload["sid"] = sid
             if spx:
                 payload["spx"] = spx
+            if pqv:
+                payload["pqv"] = pqv
 
         return (
             "vless://"
@@ -484,6 +493,7 @@ class V2rayShareLink(str):
                xhttp_extra=None,
                downloadSettings=None,
                xhttp_settings=None,
+               pqv="",
                ):
 
         payload = {
@@ -562,6 +572,8 @@ class V2rayShareLink(str):
             payload["sid"] = sid
             if spx:
                 payload["spx"] = spx
+            if pqv:
+                payload["pqv"] = pqv
 
         return (
             "trojan://"
@@ -649,7 +661,8 @@ class V2rayJsonConfig(str):
         return tlsSettings
 
     @staticmethod
-    def reality_config(sni=None, fp=None, pbk=None, sid=None, spx=None) -> dict:
+    def reality_config(sni=None, fp=None, pbk=None, sid=None, spx=None,
+                       mldsa65Verify=None) -> dict:
 
         realitySettings = {}
         if sni is not None:
@@ -665,6 +678,8 @@ class V2rayJsonConfig(str):
             realitySettings["shortId"] = sid
         if spx:
             realitySettings["spiderX"] = spx
+        if mldsa65Verify:
+            realitySettings["mldsa65Verify"] = mldsa65Verify
 
         return realitySettings
 
@@ -1052,6 +1067,7 @@ class V2rayJsonConfig(str):
                             xhttp_extra=None,
                             downloadSettings=None,
                             xhttp_settings=None,
+                            pqv="",
                             ) -> dict:
 
         if net == "ws":
@@ -1097,7 +1113,8 @@ class V2rayJsonConfig(str):
                                            pcs=pcs, vcn=vcn)
         elif tls == "reality":
             tls_settings = self.reality_config(
-                sni=sni, fp=fp, pbk=pbk, sid=sid, spx=spx)
+                sni=sni, fp=fp, pbk=pbk, sid=sid, spx=spx,
+                mldsa65Verify=pqv or None)
         else:
             tls_settings = None
 
@@ -1205,6 +1222,7 @@ class V2rayJsonConfig(str):
             xhttp_extra=inbound.get("xhttp_extra"),
             downloadSettings=inbound.get("downloadSettings"),
             xhttp_settings=inbound.get("xhttp_settings"),
+            pqv=inbound.get("pqv", ""),
         )
 
         mux_json = json.loads(self.mux_template)
