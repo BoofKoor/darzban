@@ -1,6 +1,8 @@
+import os
 from random import randint
 from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
+from app import logger
 from app.models.proxy import ProxyHostSecurity
 from app.utils.store import DictStorage
 from app.utils.system import check_port
@@ -52,6 +54,79 @@ _initialized: bool = False
 nodes: Dict[int, XRayNode] = {}
 
 
+def _minimal_fallback_config(api_port: int) -> "XRayConfig":
+    """Smallest config that keeps the panel *controllable* in degraded boot.
+
+    Built through ``XRayConfig(..., api_port=api_port)`` so ``_apply_api()``
+    injects the gRPC API inbound + ``api``/``stats``/``policy``/routing — a
+    fallback without that stack boots the panel but leaves it unable to drive
+    Xray (stats, add/remove users fail). ``_validate()`` runs *before*
+    ``_apply_api()`` and rejects empty inbounds/outbounds, so this carries one
+    no-op ``dokodemo-door`` placeholder (skipped by ``_resolve_inbounds`` since
+    it is not a proxy protocol) bound to a free loopback port distinct from the
+    API port, plus a ``freedom`` outbound. No proxy clients.
+    """
+    placeholder_port = None
+    for candidate in range(randint(10000, 60000), 65536):
+        if candidate != api_port and not check_port(candidate):
+            placeholder_port = candidate
+            break
+
+    minimal = {
+        "log": {"loglevel": "warning"},
+        "inbounds": [
+            {
+                "tag": "FALLBACK_PLACEHOLDER",
+                "listen": "127.0.0.1",
+                "port": placeholder_port,
+                "protocol": "dokodemo-door",
+                "settings": {"address": "127.0.0.1"},
+            }
+        ],
+        "outbounds": [
+            {"tag": "DIRECT", "protocol": "freedom"}
+        ],
+    }
+    return XRayConfig(minimal, api_port=api_port)
+
+
+def _load_config_resilient(api_port: int) -> "XRayConfig":
+    """Load the Xray config without ever raising out of boot.
+
+    A raise here propagates through the PEP-562 ``__getattr__`` and bricks the
+    first request/job that touches ``xray.config``. Precedence: primary file
+    -> ``.bak`` last-known-good -> minimal built-in fallback. Every fallback
+    level logs loudly so the operator knows the live config differs from
+    ``XRAY_JSON`` on disk.
+    """
+    try:
+        return XRayConfig(XRAY_JSON, api_port=api_port)
+    except Exception:
+        logger.error(
+            f"Failed to load Xray config from {XRAY_JSON}; "
+            "trying last-known-good backup",
+            exc_info=True,
+        )
+
+    bak_path = XRAY_JSON + ".bak"
+    if os.path.exists(bak_path):
+        try:
+            cfg = XRayConfig(bak_path, api_port=api_port)
+            logger.error(
+                f"Booted from backup config {bak_path}; live config differs "
+                f"from {XRAY_JSON} on disk"
+            )
+            return cfg
+        except Exception:
+            logger.error(f"Backup config {bak_path} is also unusable", exc_info=True)
+
+    logger.error(
+        "Falling back to a minimal built-in Xray config; panel is in DEGRADED "
+        "mode (proxying disabled, control plane only)"
+    )
+    return _minimal_fallback_config(api_port)
+
+
 def _initialize() -> None:
     """Bring up `core`, `config`, `api`. Idempotent.
 
@@ -73,7 +148,7 @@ def _initialize() -> None:
                 break
     finally:
         _api_port = port
-        _config = XRayConfig(XRAY_JSON, api_port=port)
+        _config = _load_config_resilient(port)
 
     _api = XRayAPI(_config.api_host, _config.api_port)
     _initialized = True

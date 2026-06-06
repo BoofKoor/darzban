@@ -7,7 +7,6 @@ from copy import deepcopy
 from pathlib import PosixPath
 from typing import Union
 
-import commentjson
 from sqlalchemy import func
 
 from app.db import GetDB
@@ -15,6 +14,7 @@ from app.db import models as db_models
 from app.models.proxy import ProxyTypes
 from app.models.user import UserStatus
 from app.utils.crypto import get_cert_SANs
+from app.utils.jsonc import load_commented_json
 # Direct submodule import — bypasses `app.xray.__getattr__('core')`, which
 # would re-enter `_initialize()` during XRayConfig construction and recurse.
 from app.xray.core import get_mldsa65 as _get_mldsa65
@@ -38,15 +38,15 @@ class XRayConfig(dict):
         if isinstance(config, str):
             try:
                 # considering string as json
-                config = commentjson.loads(config)
+                config = load_commented_json(config)
             except (json.JSONDecodeError, ValueError):
                 # considering string as file path
                 with open(config, 'r') as file:
-                    config = commentjson.loads(file.read())
+                    config = load_commented_json(file.read())
 
         if isinstance(config, PosixPath):
             with open(config, 'r') as file:
-                config = commentjson.loads(file.read())
+                config = load_commented_json(file.read())
 
         if isinstance(config, dict):
             config = deepcopy(config)

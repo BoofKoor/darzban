@@ -354,7 +354,7 @@ and re-activates non-expired/disabled users.
 ### 3d. Xray config generation
 
 **`XRayConfig`** (`app/xray/config.py:29`) subclasses `dict`; the instance *is* the config.
-Constructor accepts dict / JSON-string / file path; parsed with **`commentjson`** (comments allowed)
+Constructor accepts dict / JSON-string / file path; parsed with **`app.utils.jsonc.load_commented_json`** (stdlib json + comment/trailing-comma stripper, crash-safe — replaced `commentjson`)
 (`config.py:34-48`). Runs `_validate` → builds inbound index → caches fallback inbound →
 `_resolve_inbounds` → `_apply_api`.
 
@@ -417,7 +417,6 @@ tcp,udp), `freedom`(DIRECT) + `blackhole`(BLOCK) outbounds, a geoip:private→BL
 | cryptography / pyOpenSSL | 43.0.1 / 24.2.1 | TLS, cert SAN parsing |
 | PyMySQL | 1.1.1 | MySQL driver (no async driver) |
 | Jinja2 | 3.1.4 | templates |
-| commentjson | 0.9.0 | parse Xray config with comments |
 | requests | 2.32.3 | sync HTTP (node REST, webhooks, discord) |
 | qrcode, jdatetime, psutil, click, typer(0.7.0), rich | — | misc |
 

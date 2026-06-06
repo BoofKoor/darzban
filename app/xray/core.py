@@ -10,10 +10,28 @@ from functools import cached_property
 from typing import TYPE_CHECKING
 
 from app import logger
-from config import DEBUG, XRAY_EXECUTABLE_PATH
+from config import (
+    DEBUG,
+    XRAY_EXECUTABLE_PATH,
+    XRAY_VALIDATE_BEFORE_APPLY,
+    XRAY_VALIDATE_TIMEOUT,
+)
 
 if TYPE_CHECKING:
     from app.xray.config import XRayConfig
+
+
+class XRayConfigError(ValueError):
+    """Raised when the bundled Xray binary rejects a config via `run -test`.
+
+    Subclasses ValueError so existing `except ValueError` config-handling
+    paths keep treating a bad config as a 4xx-class problem. Carries the
+    binary's stderr so the API can surface the real reason to the operator.
+    """
+
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.stderr = message
 
 
 def get_mldsa65(seed: str, executable_path: str = XRAY_EXECUTABLE_PATH):
@@ -202,6 +220,49 @@ class XRayCore:
             self.start(config)
         finally:
             self.restarting = False
+
+    def test_config(self, config: XRayConfig):
+        """Validate `config` with `xray run -test` before it is applied.
+
+        Mirrors `start()` exactly — same cmd shape, same env, config fed on
+        stdin — so a passing test faithfully predicts what `start()`/`restart()`
+        would run. Pass the already-resolved config (i.e. the output of
+        `include_db_users()`), which is what actually gets started.
+
+        Raises `XRayConfigError` (carrying Xray's stderr) when the binary
+        rejects the config. Soft-passes — never raises — when validation
+        cannot be performed (binary missing, times out) or is disabled via
+        `XRAY_VALIDATE_BEFORE_APPLY`, so this gate can only ever *prevent* a
+        known-bad apply, never make the panel less available than before.
+        """
+        if not XRAY_VALIDATE_BEFORE_APPLY:
+            return
+
+        cmd = [self.executable_path, "run", "-test", "-config", "stdin:"]
+        try:
+            result = subprocess.run(
+                cmd,
+                input=config.to_json(),
+                env=self._env,
+                capture_output=True,
+                text=True,
+                timeout=XRAY_VALIDATE_TIMEOUT,
+            )
+        except FileNotFoundError:
+            logger.warning(
+                f"Xray binary not found at {self.executable_path}; "
+                "skipping pre-apply config validation"
+            )
+            return
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"Xray config validation timed out after {XRAY_VALIDATE_TIMEOUT}s; "
+                "applying without validation"
+            )
+            return
+
+        if result.returncode != 0:
+            raise XRayConfigError((result.stderr or result.stdout or "").strip())
 
     def on_start(self, func: callable):
         self._on_start_funcs.append(func)

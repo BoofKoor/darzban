@@ -35,6 +35,11 @@ XRAY_FALLBACKS_INBOUND_TAG = config("XRAY_FALLBACKS_INBOUND_TAG", cast=str, defa
 )
 XRAY_EXECUTABLE_PATH = config("XRAY_EXECUTABLE_PATH", default="/usr/local/bin/xray")
 XRAY_ASSETS_PATH = config("XRAY_ASSETS_PATH", default="/usr/local/share/xray")
+# Gate a new core config through `xray run -test` before applying it. When the
+# binary is missing or the test times out, the gate soft-passes (see
+# XRayCore.test_config) so it can only prevent a known-bad apply.
+XRAY_VALIDATE_BEFORE_APPLY = config("XRAY_VALIDATE_BEFORE_APPLY", cast=bool, default=True)
+XRAY_VALIDATE_TIMEOUT = config("XRAY_VALIDATE_TIMEOUT", cast=int, default=10)
 XRAY_EXCLUDE_INBOUND_TAGS = config("XRAY_EXCLUDE_INBOUND_TAGS", default='').split()
 XRAY_SUBSCRIPTION_URL_PREFIX = config("XRAY_SUBSCRIPTION_URL_PREFIX", default="").strip("/")
 XRAY_SUBSCRIPTION_PATH = config("XRAY_SUBSCRIPTION_PATH", default="sub").strip("/")
