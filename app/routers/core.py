@@ -11,7 +11,7 @@ from app.db import Session, get_db
 from app.models.admin import Admin
 from app.models.core import CoreStats
 from app.utils import responses
-from app.xray import XRayConfig
+from app.xray import XRayConfig, reconnect
 from config import XRAY_JSON
 
 router = APIRouter(tags=["Core"], prefix="/api", responses={401: responses._401})
@@ -93,6 +93,7 @@ def restart_core(admin: Admin = Depends(Admin.check_sudo_admin)):
 
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
+            reconnect.reset_policy(node_id)
             xray.operations.restart_node(node_id, startup_config)
 
     return {}
@@ -125,6 +126,7 @@ def modify_core_config(
     xray.core.restart(startup_config)
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
+            reconnect.reset_policy(node_id)
             xray.operations.restart_node(node_id, startup_config)
 
     xray.hosts.update()

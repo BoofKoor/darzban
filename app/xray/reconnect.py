@@ -87,8 +87,8 @@ class ReconnectPolicy:
         """
         with self._lock:
             self.consecutive_failures += 1
-            # base * 2^(n-1), capped at `cap`. For base=1, cap=300:
-            # n=1 → 1s, n=2 → 2s, ... n=9 → 256s, n>=10 → 300s.
+            # base * 2^(n-1), capped at `cap`. For base=1, cap=30:
+            # n=1 → 1s, n=2 → 2s, ... n=5 → 16s, n>=6 → 30s.
             # The exponent is clamped at 30 (~1e9) so a long-down node
             # doesn't overflow the float computation after thousands of
             # consecutive failures.
@@ -169,6 +169,21 @@ def discard_policy(node_id: int) -> None:
         _policies.pop(node_id, None)
 
 
+def reset_policy(node_id: int) -> None:
+    """Reset a node's backoff/circuit to healthy, in place.
+
+    Used by operator-initiated / planned reconnects (core restart, the
+    manual Reconnect button) so a node sitting in a long cooldown or an
+    open circuit is retried immediately with a clean slate instead of
+    waiting out a stale backoff. Resets the EXISTING policy object (not
+    ``discard_policy``) so any in-flight thread holding the same instance
+    observes the reset. A subsequent failed attempt re-arms the backoff
+    from base, so the dead-node circuit breaker still engages — this only
+    clears accumulated state once, on an explicit operator action.
+    """
+    get_policy(node_id).on_success()
+
+
 def reset_all() -> None:
     """Empty the registry. For tests."""
     with _registry_lock:
@@ -188,4 +203,5 @@ __all__ = [
     "discard_policy",
     "get_policy",
     "reset_all",
+    "reset_policy",
 ]

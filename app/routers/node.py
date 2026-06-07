@@ -20,6 +20,7 @@ from app.models.node import (
 )
 from app.models.proxy import ProxyHost
 from app.utils import responses
+from app.xray import reconnect
 
 router = APIRouter(
     tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
@@ -180,6 +181,10 @@ def reconnect_node(
     _: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Trigger a reconnection for the specified node. Only accessible to sudo admins."""
+    # Clear any accumulated backoff / open circuit first so the operator's
+    # reconnect retries immediately with a clean slate instead of being
+    # gated by a stale cooldown.
+    reconnect.reset_policy(dbnode.id)
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
     return {"detail": "Reconnection task scheduled"}
 

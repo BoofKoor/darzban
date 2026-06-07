@@ -17,6 +17,7 @@ from websocket import WebSocketConnectionClosedException, WebSocketTimeoutExcept
 
 from app import logger
 from app.xray.config import XRayConfig
+from config import NODE_GRPC_READY_TIMEOUT
 from xray_api import XRay as XRayAPI
 
 
@@ -189,7 +190,7 @@ class ReSTXRayNode:
         )
 
         try:
-            grpc.channel_ready_future(self._api._channel).result(timeout=5)
+            grpc.channel_ready_future(self._api._channel).result(timeout=NODE_GRPC_READY_TIMEOUT)
         except grpc.FutureTimeoutError:
             raise ConnectionError('Failed to connect to node\'s API')
 
@@ -222,7 +223,7 @@ class ReSTXRayNode:
         )
 
         try:
-            grpc.channel_ready_future(self._api._channel).result(timeout=5)
+            grpc.channel_ready_future(self._api._channel).result(timeout=NODE_GRPC_READY_TIMEOUT)
         except grpc.FutureTimeoutError:
             raise ConnectionError('Failed to connect to node\'s API')
 
@@ -437,7 +438,7 @@ class RPyCXRayNode:
             ssl_target_name="Gozargah"
         )
         try:
-            grpc.channel_ready_future(self._api._channel).result(timeout=5)
+            grpc.channel_ready_future(self._api._channel).result(timeout=NODE_GRPC_READY_TIMEOUT)
         except grpc.FutureTimeoutError:
 
             start_time = time.time()

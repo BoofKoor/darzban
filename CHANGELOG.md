@@ -8,6 +8,26 @@ upstream Marzban API surface takes precedence.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Nodes now reconnect promptly after a panel/core restart instead of
+  hanging for 10s–5min.** On a panel restart the node's Xray keeps running,
+  so the re-sync hits `/start` → `503 'Xray is started already'` → a
+  fallback restart that pushes the full config; bringing a node's gRPC API
+  back up under a large (e.g. 16k-user) config takes longer than the
+  hardcoded **5s** `channel_ready` wait, so the wait timed out
+  (`Failed to connect to node's API`) and the per-node reconnect backoff
+  climbed to its **300s** cap — leaving nodes stuck until a manual
+  *Reconnect*. Two changes:
+  - The gRPC channel-ready timeout is now configurable via
+    `NODE_GRPC_READY_TIMEOUT` (default **30s**, was a hardcoded 5s). It
+    returns as soon as the channel is ready, so fast nodes are unaffected.
+  - The reconnect backoff cap default drops from **300s → 30s**
+    (`NODE_RECONNECT_BACKOFF_CAP`), and operator-initiated reconnects (core
+    restart, `PUT /core/config`, the manual *Reconnect* button) now reset a
+    node's backoff/circuit first so they retry immediately. The circuit
+    breaker is unchanged, so a genuinely-dead node is still throttled.
+
 ## [0.11.0] - 2026-06-03
 
 ### Added
