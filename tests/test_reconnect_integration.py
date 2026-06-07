@@ -365,17 +365,17 @@ def test_backoff_accumulates_across_successive_connect_node_failures(
 
         node_id = fake_dbnode.id
         # Drive 6 real failed attempts. Expected progression with
-        # BASE=1, CAP=300, THRESHOLD=5:
+        # BASE=1, CAP=30, THRESHOLD=5:
         #   attempt: 1   2   3   4   5(circuit opens)  6
         #   failures:1   2   3   4   5                 6
-        #   backoff: 1   2   4   8   16                32
+        #   backoff: 1   2   4   8   16                30 (capped)
         expected = [
             (1, 1.0, False),
             (2, 2.0, False),
             (3, 4.0, False),
             (4, 8.0, False),
             (5, 16.0, True),    # circuit opens at threshold (5)
-            (6, 32.0, True),
+            (6, 30.0, True),    # 2^5=32 capped at CAP=30
         ]
         for i, (want_failures, want_backoff, want_circuit) in enumerate(expected, start=1):
             xray.operations.connect_node.__wrapped__(node_id)
@@ -398,7 +398,7 @@ def test_backoff_accumulates_across_successive_connect_node_failures(
     last_error_msg = [c[2] for c in recorded_status_calls
                       if c[1] == NodeStatus.error][-1]
     assert "Connection refused" in last_error_msg
-    assert "Retry in 32s" in last_error_msg
+    assert "Retry in 30s" in last_error_msg
     assert "6 consecutive failures" in last_error_msg
     assert "circuit open" in last_error_msg
 

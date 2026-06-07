@@ -12,6 +12,7 @@ from app.xray.reconnect import (
     discard_policy,
     get_policy,
     reset_all,
+    reset_policy,
 )
 
 
@@ -180,6 +181,35 @@ def test_discard_policy_removes_and_next_get_returns_fresh():
 
 def test_discard_policy_is_idempotent_for_unknown_id():
     discard_policy(node_id=9999)  # must not raise
+
+
+# ---- reset_policy (planned-restart fast-path) -------------------------------
+
+def test_reset_policy_clears_cooldown_and_circuit_in_place():
+    """An operator-initiated reset must clear backoff + circuit on the
+    EXISTING policy object (same instance), so a node stuck in a long
+    cooldown / open circuit becomes immediately due again.
+    """
+    p = get_policy(node_id=3)
+    for _ in range(6):  # past the default circuit threshold (5)
+        p.on_failure(now=100.0)
+    assert p.is_circuit_open() is True
+    assert p.should_attempt(now=100.0) is False
+
+    reset_policy(node_id=3)
+
+    same = get_policy(node_id=3)
+    assert same is p  # reset in place, not discarded/replaced
+    assert same.consecutive_failures == 0
+    assert same.current_backoff == same.base
+    assert same.next_retry_at is None
+    assert same.is_circuit_open() is False
+    assert same.should_attempt(now=100.0) is True
+
+
+def test_reset_policy_creates_policy_for_unknown_id():
+    reset_policy(node_id=8888)  # must not raise
+    assert get_policy(node_id=8888).consecutive_failures == 0
 
 
 # ---- thread safety: torn read regression ------------------------------------

@@ -156,6 +156,16 @@ JOB_SEND_NOTIFICATIONS_INTERVAL = config("JOB_SEND_NOTIFICATIONS_INTERVAL", cast
 # down node. Failed attempts double the backoff (BASE * 2^(n-1)),
 # capped at CAP. Once consecutive_failures reaches CIRCUIT_THRESHOLD
 # the policy is "circuit open"; retries continue but spaced at CAP.
+# The cap defaults to 30s (lowered from 300s) so a node recovers within
+# ~30s of becoming healthy instead of waiting out a 5-minute backoff;
+# the circuit breaker still throttles a genuinely-dead node.
 NODE_RECONNECT_BACKOFF_BASE = config("NODE_RECONNECT_BACKOFF_BASE", cast=float, default=1.0)
-NODE_RECONNECT_BACKOFF_CAP = config("NODE_RECONNECT_BACKOFF_CAP", cast=float, default=300.0)
+NODE_RECONNECT_BACKOFF_CAP = config("NODE_RECONNECT_BACKOFF_CAP", cast=float, default=30.0)
 NODE_RECONNECT_CIRCUIT_THRESHOLD = config("NODE_RECONNECT_CIRCUIT_THRESHOLD", cast=int, default=5)
+
+# Seconds to wait for a node's Xray gRPC API (port 62051) to become ready
+# after a /start or /restart. Was hardcoded at 5s, which is too short for a
+# node bringing up a large (e.g. 16k-user) config — the wait would time out
+# and trip the reconnect backoff above. grpc.channel_ready_future returns as
+# soon as the channel is up, so a larger ceiling is a no-op for fast nodes.
+NODE_GRPC_READY_TIMEOUT = config("NODE_GRPC_READY_TIMEOUT", cast=float, default=30.0)
